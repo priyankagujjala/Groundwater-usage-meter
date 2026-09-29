@@ -56,3 +56,9 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# TLS & Certificate files
+*.crt
+*.pem
+*.key
+*.cer
