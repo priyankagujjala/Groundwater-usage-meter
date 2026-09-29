@@ -1,7 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 class Device(db.Model):
     __tablename__ = "devices"
@@ -31,7 +34,7 @@ class Reading(db.Model):
     device_id = db.Column(db.String(64), db.ForeignKey("devices.id"), nullable=False)
     litres = db.Column(db.Float, nullable=False, default=0.0)
     total_l = db.Column(db.Float, nullable=False, default=0.0)
-    ts = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    ts = db.Column(db.DateTime, nullable=False, default=utc_now)
 
     def to_dict(self):
         return {
@@ -53,7 +56,7 @@ class Bill(db.Model):
     status = db.Column(db.String(32), nullable=False, default="unpaid") # "unpaid" | "paid"
     razorpay_order_id = db.Column(db.String(128), nullable=True)
     payment_id = db.Column(db.String(128), nullable=True)
-    ts = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    ts = db.Column(db.DateTime, nullable=False, default=utc_now)
 
     def to_dict(self):
         return {

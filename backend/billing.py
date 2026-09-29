@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from flask import has_app_context
 
 try:
     from .models import db, Device, Reading, Bill
@@ -55,7 +56,25 @@ def set_device_relay(device_id: str, state: str) -> bool:
 
 
 def is_device_online(device_id: str, max_silence_seconds: int = 30) -> bool:
-    """Check if the device has transmitted telemetry recently."""
+    """
+    Check if the device is online via MQTT status topic first,
+    falling back to recent telemetry timestamp.
+    """
+    try:
+        from .mqtt_client import get_device_status
+    except (ImportError, ModuleNotFoundError):
+        try:
+            from mqtt_client import get_device_status
+        except (ImportError, ModuleNotFoundError):
+            get_device_status = None
+
+    if get_device_status:
+        status = get_device_status(device_id)
+        if status == "online":
+            return True
+        elif status == "offline":
+            return False
+
     dev_state = get_device_state(device_id)
     last_seen = dev_state.get("last_seen")
     if not last_seen:
@@ -69,24 +88,35 @@ def is_device_online(device_id: str, max_silence_seconds: int = 30) -> bool:
 
 def process_reading(device_id: str, litres: float, total_l: float, flow_lpm: float) -> dict:
     """
-    Ingest a telemetry reading, persist it to the database, update runtime state,
-    and enforce monthly quota limit and billing logic.
+    Entry point for processing a new telemetry reading:
+    Ensures execution within a valid Flask application context (thread-safe for MQTT listener).
+    """
+    if not has_app_context():
+        try:
+            from .app import _global_app, create_app
+        except ImportError:
+            from app import _global_app, create_app
+        app_instance = _global_app or create_app()
+        with app_instance.app_context():
+            return _execute_process_reading(device_id, litres, total_l, flow_lpm)
+    else:
+        return _execute_process_reading(device_id, litres, total_l, flow_lpm)
 
-    Args:
-        device_id (str): ID of the device (e.g., 'device1')
-        litres (float): Litres extracted during the last measurement interval
-        total_l (float): Cumulative total litres extracted
-        flow_lpm (float): Current flow rate in Litres per minute
 
-    Returns:
-        dict: Result summary with reading info, quota status, and billing action taken.
+def _execute_process_reading(device_id: str, litres: float, total_l: float, flow_lpm: float) -> dict:
+    """
+    Updates runtime state, checks monthly limit threshold, creates bill (once),
+    and enforces relay cut-off.
+
+    Note: The reading itself is already persisted by mqtt_client.py (_insert_reading_to_db)
+    so it is NOT duplicated here.
     """
     # 1. Update in-memory runtime telemetry
     dev_state = get_device_state(device_id)
     dev_state["flow_lpm"] = round(float(flow_lpm), 2)
     dev_state["last_seen"] = datetime.now(timezone.utc)
 
-    # 2. Lookup or seed device entity
+    # 2. Lookup or seed device entity in SQLAlchemy DB
     device = db.session.get(Device, device_id)
     if not device:
         logger.info(f"Auto-registering device '{device_id}' with default limits.")
@@ -94,19 +124,10 @@ def process_reading(device_id: str, litres: float, total_l: float, flow_lpm: flo
         db.session.add(device)
         db.session.commit()
 
-    # 3. Persist new reading record
-    reading = Reading(
-        device_id=device_id,
-        litres=float(litres),
-        total_l=float(total_l),
-        ts=datetime.now(timezone.utc)
-    )
-    db.session.add(reading)
-
     action = "RECORDED"
     bill_created = None
 
-    # 4. Limit and Billing Enforcement Logic:
+    # 3. Limit and Billing Enforcement Logic:
     # When total_l crosses monthly_limit_l and there is no unpaid bill for the device:
     # create a bill (excess_l = total_l - limit, amount = excess_l * rate_per_l, status "unpaid")
     # exactly once, then call publish_relay(device, "OFF") and set relay to OFF.

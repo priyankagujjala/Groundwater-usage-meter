@@ -11,6 +11,8 @@ def test_health_check(client):
 def test_get_usage_structure_and_values(client, app):
     """GET /api/usage/<device> returns strict contract structure."""
     with app.app_context():
+        db.session.add(Reading(device_id="device1", litres=2.5, total_l=132.5))
+        db.session.commit()
         process_reading("device1", litres=2.5, total_l=132.5, flow_lpm=2.4)
 
     res = client.get("/api/usage/device1")
@@ -28,9 +30,10 @@ def test_get_usage_structure_and_values(client, app):
 def test_get_readings_chronological_order(client, app):
     """GET /api/readings/<device> returns list ordered oldest first."""
     with app.app_context():
-        process_reading("device1", litres=1.0, total_l=10.0, flow_lpm=2.0)
-        process_reading("device1", litres=2.0, total_l=12.0, flow_lpm=2.2)
-        process_reading("device1", litres=3.0, total_l=15.0, flow_lpm=2.5)
+        db.session.add(Reading(device_id="device1", litres=1.0, total_l=10.0))
+        db.session.add(Reading(device_id="device1", litres=2.0, total_l=12.0))
+        db.session.add(Reading(device_id="device1", litres=3.0, total_l=15.0))
+        db.session.commit()
 
     res = client.get("/api/readings/device1")
     assert res.status_code == 200

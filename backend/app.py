@@ -17,8 +17,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("app")
 
+_global_app = None
+
 def create_app(config_class=Config):
     """Application factory for the Groundwater Meter API."""
+    global _global_app
     app = Flask(__name__)
     app.config.from_object(config_class)
 
@@ -37,6 +40,19 @@ def create_app(config_class=Config):
         db.create_all()
         _seed_initial_data()
 
+    # Start MQTT background ingestion loop once at startup (not twice under debug reloader)
+    if not app.config.get("TESTING", False):
+        if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+            try:
+                try:
+                    from .mqtt_client import start_mqtt
+                except ImportError:
+                    from mqtt_client import start_mqtt
+                start_mqtt()
+            except Exception as mqtt_err:
+                logger.warning(f"MQTT startup deferred: {mqtt_err}")
+
+    _global_app = app
     return app
 
 

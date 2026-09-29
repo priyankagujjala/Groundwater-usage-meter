@@ -1,9 +1,10 @@
+from unittest.mock import patch
 import pytest
-from backend.billing import process_reading, get_device_state, set_device_relay
+from backend.billing import process_reading, get_device_state, set_device_relay, is_device_online
 from backend.models import Bill, Reading, Device
 
 def test_process_reading_below_limit(app):
-    """Readings below monthly limit should record reading and keep relay ON with no bill."""
+    """Readings below monthly limit should keep relay ON with no bill."""
     with app.app_context():
         res = process_reading("device1", litres=5.0, total_l=450.0, flow_lpm=2.4)
 
@@ -15,10 +16,6 @@ def test_process_reading_below_limit(app):
         # Check DB
         bills = Bill.query.filter_by(device_id="device1").all()
         assert len(bills) == 0
-
-        readings = Reading.query.filter_by(device_id="device1").all()
-        assert len(readings) == 1
-        assert readings[0].total_l == 450.0
 
 
 def test_process_reading_crosses_limit_creates_bill_and_turns_relay_off(app):
@@ -83,3 +80,21 @@ def test_custom_rate_calculation(app):
         assert res["bill"] is not None
         assert res["bill"]["excess_l"] == 20.5
         assert res["bill"]["amount"] == 5.12
+
+
+def test_limit_crossing_calls_publish_relay_off(app):
+    """Verify that crossing limit invokes publish_relay('device1', 'OFF')."""
+    with app.app_context():
+        with patch("backend.billing.publish_relay") as mock_publish:
+            process_reading("device1", litres=15.0, total_l=510.0, flow_lpm=2.4)
+            mock_publish.assert_called_once_with("device1", "OFF")
+
+
+def test_online_status_from_mqtt(app):
+    """Verify that is_device_online reflects MQTT status."""
+    with app.app_context():
+        with patch("backend.mqtt_client.get_device_status", return_value="online"):
+            assert is_device_online("device1") is True
+
+        with patch("backend.mqtt_client.get_device_status", return_value="offline"):
+            assert is_device_online("device1") is False

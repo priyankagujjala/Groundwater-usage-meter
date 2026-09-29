@@ -284,6 +284,16 @@ def _on_message(client, userdata, msg):
                 f"Flow: {flow_lpm:.2f} L/min | Interval: {litres:.3f} L | Total: {total_l:.3f} L"
             )
 
+            # Trigger limit checking and billing logic
+            try:
+                try:
+                    from .billing import process_reading
+                except ImportError:
+                    from billing import process_reading
+                process_reading(device_name, litres, total_l, flow_lpm)
+            except Exception as billing_err:
+                logger.error(f"Error executing billing process_reading: {billing_err}", exc_info=True)
+
             # Invoke registered handlers (e.g. Flask billing/limit triggers)
             with _state_lock:
                 handlers = list(_reading_handlers)
