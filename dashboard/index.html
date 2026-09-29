@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Groundwater Usage Meter & Pay-on-Excess Telemetry Dashboard">
+  <title>Groundwater Usage Meter | Live Telemetry & Quota</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- FontAwesome Icons via CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <!-- Chart.js via cdnjs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+  <!-- App Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="app-container">
+    
+    <!-- Top Header Navigation -->
+    <header class="app-header">
+      <div class="brand-section">
+        <div class="brand-logo">
+          <i class="fa-solid fa-droplet"></i>
+        </div>
+        <div>
+          <h1 class="brand-title">AquaPulse IoT</h1>
+          <p class="brand-subtitle">Groundwater Meter & Quota Enforcement &bull; <span id="device-label">Device 1</span></p>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <!-- Sync / Polling Spinner -->
+        <div class="sync-indicator">
+          <span class="sync-spinner" id="sync-spinner"></span>
+          <span id="sync-text">Live Sync (5s)</span>
+        </div>
+
+        <!-- Mode Badge (Mock vs Real API) -->
+        <span class="badge badge-mock" id="mock-badge">
+          <i class="fa-solid fa-flask"></i> Mock Mode
+        </span>
+
+        <!-- Device Connectivity Status -->
+        <span class="badge badge-online" id="device-status-badge">
+          <span class="badge-dot"></span>
+          <span id="device-status-text">ONLINE</span>
+        </span>
+
+        <!-- Light / Dark Theme Switcher -->
+        <button class="btn-icon" id="theme-toggle-btn" title="Toggle Light/Dark Theme" aria-label="Toggle Theme">
+          <i class="fa-solid fa-moon" id="theme-icon"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- Friendly Error / Quota Alert Banner -->
+    <div class="alert-banner danger" id="system-alert-banner">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <i class="fa-solid fa-triangle-exclamation" id="alert-icon"></i>
+        <span id="alert-message">Monthly groundwater limit exceeded! Motor valve has been shut off.</span>
+      </div>
+      <button class="btn-icon" style="width: 28px; height: 28px; font-size: 0.8rem; background: transparent; border: none; color: inherit;" id="close-alert-btn" aria-label="Close Alert">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <!-- Main Dashboard Grid -->
+    <main class="dashboard-grid">
+      
+      <!-- 1. Quota & Usage Gauge -->
+      <section class="card col-gauge" id="card-gauge" aria-label="Water Usage Gauge">
+        <div class="card-header">
+          <h2 class="card-title"><i class="fa-solid fa-gauge-high"></i> Monthly Quota</h2>
+          <span class="usage-percent-badge" id="gauge-percent-badge">0%</span>
+        </div>
+
+        <div class="gauge-wrapper" id="gauge-wrapper">
+          <svg class="gauge-svg" viewBox="0 0 200 200">
+            <!-- Background Arc Track -->
+            <circle class="gauge-bg" cx="100" cy="100" r="90" />
+            <!-- Animated Progress Arc -->
+            <circle class="gauge-progress" id="gauge-progress-circle" cx="100" cy="100" r="90" />
+          </svg>
+          <div class="gauge-center-content">
+            <span class="gauge-used-val" id="gauge-used-litres">0.0</span>
+            <span class="gauge-unit">Litres Used</span>
+            <span class="gauge-limit-subtext">Limit: <strong id="gauge-limit-litres">500</strong> L</span>
+          </div>
+        </div>
+
+        <div class="gauge-footer">
+          <span style="font-size: 0.8rem; color: var(--text-muted);" id="gauge-status-desc">
+            Consumption within standard allowance
+          </span>
+        </div>
+      </section>
+
+      <!-- 2. Live Flow Rate -->
+      <section class="card col-flow flow-active" id="card-flow" aria-label="Live Flow Rate">
+        <div class="card-header">
+          <h2 class="card-title"><i class="fa-solid fa-water"></i> Live Flow Rate</h2>
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Real-time Telemetry</span>
+        </div>
+
+        <div class="flow-display">
+          <div class="flow-icon-container">
+            <i class="fa-solid fa-faucet-drip"></i>
+          </div>
+          <div class="flow-val" id="live-flow-rate">0.0</div>
+          <div class="flow-unit">L / min (Flow Rate)</div>
+        </div>
+
+        <div class="flow-meta">
+          <div class="meta-item">
+            <div class="meta-label">Est. Hourly</div>
+            <div class="meta-val" id="flow-hourly">0 L/h</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Flow Velocity</div>
+            <div class="meta-val" id="flow-velocity-desc">Normal</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Relay Valve State & Manual Control -->
+      <section class="card col-relay" id="card-relay" aria-label="Relay Control">
+        <div class="card-header">
+          <h2 class="card-title"><i class="fa-solid fa-power-off"></i> Relay Valve</h2>
+          <span id="relay-mode-badge" style="font-size: 0.75rem; color: var(--text-muted);">Manual Override</span>
+        </div>
+
+        <div class="relay-content">
+          <div class="relay-status-pill on" id="relay-status-pill">
+            <i class="fa-solid fa-circle-check" id="relay-icon"></i>
+            <span id="relay-status-text">VALVE OPEN (ON)</span>
+          </div>
+
+          <p class="relay-desc" id="relay-desc">
+            Motor valve is active. Water extraction permitted under monthly quota.
+          </p>
+
+          <button class="btn-relay-toggle action-turn-off" id="btn-toggle-relay">
+            <i class="fa-solid fa-power-off"></i>
+            <span id="btn-toggle-relay-text">Turn Relay OFF</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 4. Historical Consumption Line Chart -->
+      <section class="card col-chart" aria-label="Historical Consumption Chart">
+        <div class="card-header">
+          <h2 class="card-title"><i class="fa-solid fa-chart-line"></i> Extraction History</h2>
+          <div class="chart-controls">
+            <button class="btn-pill active" data-range="live">Live (10)</button>
+            <button class="btn-pill" data-range="hourly">Hourly</button>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <canvas id="usageHistoryChart"></canvas>
+        </div>
+      </section>
+
+      <!-- 5. Tariff & Quota Summary Info -->
+      <section class="card col-info" aria-label="Tariff and Limits">
+        <div class="card-header">
+          <h2 class="card-title"><i class="fa-solid fa-receipt"></i> Policy & Billing</h2>
+        </div>
+
+        <div class="info-list">
+          <div class="info-row">
+            <span class="info-label"><i class="fa-solid fa-shield-halved"></i> Monthly Quota</span>
+            <span class="info-val" id="policy-quota">500 Litres</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label"><i class="fa-solid fa-coins"></i> Excess Tariff</span>
+            <span class="info-val" id="policy-rate">₹0.10 / Litre</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label"><i class="fa-solid fa-triangle-exclamation"></i> Excess Consumed</span>
+            <span class="info-val" id="policy-excess-litres" style="color: var(--warning);">0.0 L</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label"><i class="fa-solid fa-indian-rupee-sign"></i> Current Bill Due</span>
+            <span class="info-val" id="policy-excess-amount" style="color: var(--danger);">₹0.00</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. Bills & Invoices Table -->
+      <section class="card col-bills" aria-label="Billing Invoices">
+        <div class="card-header">
+          <h2 class="card-title"><i class="fa-solid fa-file-invoice-dollar"></i> Excess Usage Invoices</h2>
+          <span style="font-size: 0.8rem; color: var(--text-muted);" id="bills-count">0 bills</span>
+        </div>
+
+        <div class="table-responsive">
+          <table class="custom-table" id="bills-table">
+            <thead>
+              <tr>
+                <th>Invoice ID</th>
+                <th>Device</th>
+                <th>Excess Litres</th>
+                <th>Amount (INR)</th>
+                <th>Status</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="bills-table-body">
+              <tr>
+                <td colspan="6" class="empty-state">
+                  <i class="fa-regular fa-folder-open" style="font-size: 1.5rem; display: block; margin-bottom: 8px;"></i>
+                  No excess bills generated yet. Consumption is within monthly limits.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Step 3 Demo & Mock Simulator Toolbar (Useful for testing without backend) -->
+    <aside class="mock-toolbar" id="mock-toolbar">
+      <div class="mock-toolbar-title">
+        <i class="fa-solid fa-vial-circle-check"></i>
+        <span>Demo & Mock Controls (Member 3 Testing)</span>
+      </div>
+      <div class="mock-btn-group">
+        <button class="btn-mock" id="mock-btn-add-flow" title="Simulate drawing 30L of water">
+          <i class="fa-solid fa-plus"></i> Add +30 L
+        </button>
+        <button class="btn-mock" id="mock-btn-trigger-breach" title="Cross 500L threshold immediately">
+          <i class="fa-solid fa-radiation"></i> Trigger Limit Breach (>500L)
+        </button>
+        <button class="btn-mock" id="mock-btn-toggle-network" title="Simulate backend network drop">
+          <i class="fa-solid fa-network-wired"></i> Toggle Network Failure
+        </button>
+        <button class="btn-mock" id="mock-btn-reset" title="Reset all telemetry to clean state">
+          <i class="fa-solid fa-rotate-left"></i> Reset Demo State
+        </button>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Scripts: Config first, then Core Logic App -->
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
