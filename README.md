@@ -129,8 +129,34 @@ REST API and MQTT subscriber handling database persistence and billing logic.
 
 ---
 
-## 5. Deployment
+## 5. Deploy
 
-- **Dashboard**: Hosted on [Netlify](https://www.netlify.com/). Connect the GitHub repository with publish directory set to `dashboard`.
-- **Backend**: Hosted on Render or Railway with PostgreSQL on Neon/Supabase.
-- **MQTT**: Hosted on EMQX Serverless Cloud.
+### Dashboard (Netlify)
+
+The dashboard is configured for zero-build static hosting via `netlify.toml`:
+
+1. **Option A: Netlify Git Integration (Recommended)**
+   - Log into [Netlify](https://app.netlify.com/).
+   - Click **"Add new site"** > **"Import an existing project"** > select **GitHub**.
+   - Choose `priyankagujjala/Groundwater-usage-meter`.
+   - Set **Branch to deploy**: `main` (or active feature branch for testing).
+   - Set **Publish directory**: `dashboard` (automatically detected from `netlify.toml`).
+   - Leave **Build command** empty.
+   - Click **Deploy Site**.
+
+2. **Option B: Netlify CLI**
+   ```bash
+   npm i -g netlify-cli
+   netlify login
+   netlify deploy --prod --dir=dashboard
+   ```
+
+3. **Connecting Backend:**
+   Once the Flask backend is deployed on Render/Railway, update `API_BASE_URL` in `dashboard/config.js` to your backend's HTTPS endpoint and set `USE_MOCK = false`.
+
+### Backend & Database
+
+- **Backend**: Deployed to Render or Railway with Python runtime and environment variables.
+- **PostgreSQL**: Hosted on Neon or Supabase.
+- **MQTT Broker**: Hosted on EMQX Serverless Cloud.
+
