@@ -1,4 +1,6 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
+import razorpay
+
 try:
     from .models import db, Device, Reading, Bill
     from .billing import get_device_state, set_device_relay, is_device_online
@@ -137,28 +139,130 @@ def get_bills(device):
 
 
 # ==============================================================================
-# RAZORPAY PAYMENT ENDPOINTS (TODO: To be implemented in Task 4 / Final Task)
+# RAZORPAY PAYMENT ENDPOINTS
 # ==============================================================================
 
 @api_bp.route("/api/pay/create-order", methods=["POST"])
 def create_payment_order():
     """
     POST /api/pay/create-order
-    TODO: Razorpay Order Creation (Final Task)
+    Body: {"bill_id": <bill_id>}
+    Creates a Razorpay order for an unpaid bill and updates bill.razorpay_order_id.
     """
+    data = request.get_json(silent=True)
+    if not data or "bill_id" not in data or data["bill_id"] is None:
+        return jsonify({"error": "Missing required field 'bill_id'."}), 400
+
+    bill_id = data["bill_id"]
+    try:
+        bill_id = int(bill_id)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid 'bill_id' format. Must be an integer."}), 400
+
+    bill = db.session.get(Bill, bill_id)
+    if not bill:
+        return jsonify({"error": f"Bill with ID {bill_id} not found."}), 404
+
+    if bill.status == "paid":
+        return jsonify({"error": f"Bill #{bill.id} is already paid."}), 400
+
+    key_id = current_app.config.get("RAZORPAY_KEY_ID", "rzp_test_placeholder")
+    key_secret = current_app.config.get("RAZORPAY_KEY_SECRET", "rzp_secret_placeholder")
+
+    # Amount in paise (1 INR = 100 paise)
+    amount_paise = int(round(bill.amount * 100))
+
+    try:
+        client = razorpay.Client(auth=(key_id, key_secret))
+        order_data = {
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": f"receipt_bill_{bill.id}",
+            "notes": {
+                "bill_id": str(bill.id),
+                "device_id": str(bill.device_id)
+            }
+        }
+        order = client.order.create(data=order_data)
+    except Exception as e:
+        return jsonify({"error": "Failed to create Razorpay order."}), 500
+
+    bill.razorpay_order_id = order["id"]
+    db.session.commit()
+
     return jsonify({
-        "error": "Not Implemented",
-        "message": "Razorpay order creation will be implemented in the final Razorpay task."
-    }), 501
+        "success": True,
+        "order_id": order["id"],
+        "amount": amount_paise,
+        "currency": "INR",
+        "key_id": key_id,
+        "bill_id": bill.id
+    }), 200
 
 
 @api_bp.route("/api/pay/verify", methods=["POST"])
 def verify_payment():
     """
     POST /api/pay/verify
-    TODO: Razorpay Signature Verification & Bill Mark-Paid (Final Task)
+    Body: {"bill_id": <int>, "order_id": <str>, "payment_id": <str>, "signature": <str>}
+    Verifies Razorpay payment signature, marks bill as paid, and turns relay ON.
     """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be valid JSON."}), 400
+
+    required_fields = ["bill_id", "order_id", "payment_id", "signature"]
+    for field in required_fields:
+        if field not in data or data[field] is None or str(data[field]).strip() == "":
+            return jsonify({"error": f"Missing required parameter '{field}'."}), 400
+
+    bill_id = data["bill_id"]
+    try:
+        bill_id = int(bill_id)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid 'bill_id' format. Must be an integer."}), 400
+
+    bill = db.session.get(Bill, bill_id)
+    if not bill:
+        return jsonify({"error": f"Bill with ID {bill_id} not found."}), 404
+
+    if bill.status == "paid":
+        return jsonify({"error": f"Bill #{bill.id} is already paid."}), 400
+
+    order_id = str(data["order_id"]).strip()
+    payment_id = str(data["payment_id"]).strip()
+    signature = str(data["signature"]).strip()
+
+    if not bill.razorpay_order_id or bill.razorpay_order_id != order_id:
+        return jsonify({"error": "Order ID mismatch. Supplied order_id does not match the bill's Razorpay order ID."}), 400
+
+    key_id = current_app.config.get("RAZORPAY_KEY_ID", "rzp_test_placeholder")
+    key_secret = current_app.config.get("RAZORPAY_KEY_SECRET", "rzp_secret_placeholder")
+
+    try:
+        client = razorpay.Client(auth=(key_id, key_secret))
+        client.utility.verify_payment_signature({
+            "razorpay_order_id": order_id,
+            "razorpay_payment_id": payment_id,
+            "razorpay_signature": signature
+        })
+    except Exception:
+        return jsonify({"error": "Razorpay payment signature verification failed."}), 400
+
+    # Verification successful: update bill
+    bill.status = "paid"
+    bill.payment_id = payment_id
+    db.session.commit()
+
+    # Turn device relay ON
+    set_device_relay(bill.device_id, "ON")
+
     return jsonify({
-        "error": "Not Implemented",
-        "message": "Razorpay signature verification will be implemented in the final Razorpay task."
-    }), 501
+        "success": True,
+        "message": "Payment verified successfully and relay turned ON.",
+        "bill_id": bill.id,
+        "status": "paid",
+        "payment_id": bill.payment_id,
+        "relay": "ON"
+    }), 200
+
