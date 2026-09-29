@@ -58,12 +58,11 @@ def create_app(config_class=Config):
 
 def _seed_initial_data():
     """Seed default device1 if not present in database."""
-    device1 = db.session.get(Device, "device1")
+    device1 = Device.query.filter_by(name="device1").first()
     if not device1:
         logger.info("Seeding default device 'device1' with limit 500L and rate Rs 0.10/L.")
         device1 = Device(
-            id="device1",
-            name="Groundwater Pump 1",
+            name="device1",
             monthly_limit_l=500.0,
             rate_per_l=0.10,
         )

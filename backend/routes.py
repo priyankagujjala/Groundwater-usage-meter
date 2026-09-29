@@ -22,16 +22,16 @@ def get_usage(device):
     GET /api/usage/<device>
     Returns: {"device", "total", "limit", "flow_lpm", "relay", "online"}
     """
-    device_obj = db.session.get(Device, device)
+    device_obj = Device.query.filter_by(name=device).first()
     if not device_obj:
         # Create default device entity if not found
-        device_obj = Device(id=device, name=f"Meter {device}", monthly_limit_l=500.0, rate_per_l=0.10)
+        device_obj = Device(name=device, monthly_limit_l=500.0, rate_per_l=0.10)
         db.session.add(device_obj)
         db.session.commit()
 
-    # Get latest reading for total usage
+    # Get latest reading for total usage using integer device_obj.id
     latest_reading = (
-        Reading.query.filter_by(device_id=device)
+        Reading.query.filter_by(device_id=device_obj.id)
         .order_by(Reading.ts.desc(), Reading.id.desc())
         .first()
     )
@@ -57,9 +57,13 @@ def get_readings(device):
     GET /api/readings/<device>
     Returns: list of {"ts", "litres", "total"}, latest 100, oldest first
     """
+    device_obj = Device.query.filter_by(name=device).first()
+    if not device_obj:
+        return jsonify([]), 200
+
     # Fetch latest 100 readings ordered descending by timestamp
     recent_readings = (
-        Reading.query.filter_by(device_id=device)
+        Reading.query.filter_by(device_id=device_obj.id)
         .order_by(Reading.ts.desc(), Reading.id.desc())
         .limit(100)
         .all()
@@ -95,9 +99,9 @@ def toggle_relay(device):
         return jsonify({"error": f"Invalid relay state '{data['relay']}'. Must be 'ON' or 'OFF'."}), 400
 
     # Ensure device exists in DB
-    device_obj = db.session.get(Device, device)
+    device_obj = Device.query.filter_by(name=device).first()
     if not device_obj:
-        device_obj = Device(id=device, name=f"Meter {device}", monthly_limit_l=500.0, rate_per_l=0.10)
+        device_obj = Device(name=device, monthly_limit_l=500.0, rate_per_l=0.10)
         db.session.add(device_obj)
         db.session.commit()
 
@@ -118,8 +122,12 @@ def get_bills(device):
     GET /api/bills/<device>
     Returns: list of {"id", "excess_l", "amount", "status", "ts"}, newest first
     """
+    device_obj = Device.query.filter_by(name=device).first()
+    if not device_obj:
+        return jsonify([]), 200
+
     bills = (
-        Bill.query.filter_by(device_id=device)
+        Bill.query.filter_by(device_id=device_obj.id)
         .order_by(Bill.ts.desc(), Bill.id.desc())
         .all()
     )
@@ -254,8 +262,9 @@ def verify_payment():
     bill.payment_id = payment_id
     db.session.commit()
 
-    # Turn device relay ON
-    set_device_relay(bill.device_id, "ON")
+    # Turn device relay ON (passing device name string 'device1')
+    device_name = bill.device.name if bill.device else "device1"
+    set_device_relay(device_name, "ON")
 
     return jsonify({
         "success": True,
@@ -265,4 +274,3 @@ def verify_payment():
         "payment_id": bill.payment_id,
         "relay": "ON"
     }), 200
-

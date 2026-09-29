@@ -9,8 +9,8 @@ def utc_now():
 class Device(db.Model):
     __tablename__ = "devices"
 
-    id = db.Column(db.String(64), primary_key=True)
-    name = db.Column(db.String(128), nullable=False, default="Groundwater Meter")
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(128), unique=True, nullable=False)
     monthly_limit_l = db.Column(db.Float, nullable=False, default=500.0)
     rate_per_l = db.Column(db.Float, nullable=False, default=0.10)
 
@@ -31,7 +31,7 @@ class Reading(db.Model):
     __tablename__ = "readings"
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    device_id = db.Column(db.String(64), db.ForeignKey("devices.id"), nullable=False)
+    device_id = db.Column(db.Integer, db.ForeignKey("devices.id"), nullable=False)
     litres = db.Column(db.Float, nullable=False, default=0.0)
     total_l = db.Column(db.Float, nullable=False, default=0.0)
     ts = db.Column(db.DateTime, nullable=False, default=utc_now)
@@ -40,6 +40,7 @@ class Reading(db.Model):
         return {
             "id": self.id,
             "device_id": self.device_id,
+            "device": self.device.name if self.device else None,
             "litres": round(self.litres, 2),
             "total": round(self.total_l, 2),
             "ts": self.ts.isoformat() if self.ts else None,
@@ -50,10 +51,10 @@ class Bill(db.Model):
     __tablename__ = "bills"
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    device_id = db.Column(db.String(64), db.ForeignKey("devices.id"), nullable=False)
+    device_id = db.Column(db.Integer, db.ForeignKey("devices.id"), nullable=False)
     excess_l = db.Column(db.Float, nullable=False, default=0.0)
     amount = db.Column(db.Float, nullable=False, default=0.0)
-    status = db.Column(db.String(32), nullable=False, default="unpaid") # "unpaid" | "paid"
+    status = db.Column(db.String(32), nullable=False, default="unpaid") # "unpaid" | "paid" | "pending"
     razorpay_order_id = db.Column(db.String(128), nullable=True)
     payment_id = db.Column(db.String(128), nullable=True)
     ts = db.Column(db.DateTime, nullable=False, default=utc_now)
@@ -62,6 +63,7 @@ class Bill(db.Model):
         return {
             "id": self.id,
             "device_id": self.device_id,
+            "device": self.device.name if self.device else None,
             "excess_l": round(self.excess_l, 2),
             "amount": round(self.amount, 2),
             "status": self.status,

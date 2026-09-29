@@ -1,5 +1,7 @@
 import json
-from backend.billing import process_reading
+from unittest.mock import MagicMock, patch
+from backend.models import db, Bill, Reading, Device
+from backend.billing import process_reading, get_device_state
 
 def test_health_check(client):
     """GET /health returns 200 with {'ok': True}."""
@@ -11,7 +13,8 @@ def test_health_check(client):
 def test_get_usage_structure_and_values(client, app):
     """GET /api/usage/<device> returns strict contract structure."""
     with app.app_context():
-        db.session.add(Reading(device_id="device1", litres=2.5, total_l=132.5))
+        device = Device.query.filter_by(name="device1").first()
+        db.session.add(Reading(device_id=device.id, litres=2.5, total_l=132.5))
         db.session.commit()
         process_reading("device1", litres=2.5, total_l=132.5, flow_lpm=2.4)
 
@@ -30,9 +33,10 @@ def test_get_usage_structure_and_values(client, app):
 def test_get_readings_chronological_order(client, app):
     """GET /api/readings/<device> returns list ordered oldest first."""
     with app.app_context():
-        db.session.add(Reading(device_id="device1", litres=1.0, total_l=10.0))
-        db.session.add(Reading(device_id="device1", litres=2.0, total_l=12.0))
-        db.session.add(Reading(device_id="device1", litres=3.0, total_l=15.0))
+        device = Device.query.filter_by(name="device1").first()
+        db.session.add(Reading(device_id=device.id, litres=1.0, total_l=10.0))
+        db.session.add(Reading(device_id=device.id, litres=2.0, total_l=12.0))
+        db.session.add(Reading(device_id=device.id, litres=3.0, total_l=15.0))
         db.session.commit()
 
     res = client.get("/api/readings/device1")
@@ -91,11 +95,6 @@ def test_get_bills_newest_first(client, app):
     assert "ts" in bills[0]
 
 
-from unittest.mock import MagicMock, patch
-from backend.models import db, Bill, Reading, Device
-from backend.billing import get_device_state
-
-
 def test_create_order_missing_bill_id(client):
     """POST /api/pay/create-order returns 400 when bill_id is missing or invalid."""
     res_empty = client.post("/api/pay/create-order", json={})
@@ -117,7 +116,8 @@ def test_create_order_nonexistent_bill(client):
 def test_create_order_already_paid_bill(client, app):
     """POST /api/pay/create-order returns 400 if the bill is already paid."""
     with app.app_context():
-        bill = Bill(device_id="device1", excess_l=10.0, amount=1.0, status="paid")
+        device = Device.query.filter_by(name="device1").first()
+        bill = Bill(device_id=device.id, excess_l=10.0, amount=1.0, status="paid")
         db.session.add(bill)
         db.session.commit()
         bill_id = bill.id
@@ -135,7 +135,8 @@ def test_create_order_success(mock_razorpay_client, client, app):
     mock_razorpay_client.return_value = mock_instance
 
     with app.app_context():
-        bill = Bill(device_id="device1", excess_l=100.0, amount=10.0, status="unpaid")
+        device = Device.query.filter_by(name="device1").first()
+        bill = Bill(device_id=device.id, excess_l=100.0, amount=10.0, status="unpaid")
         db.session.add(bill)
         db.session.commit()
         bill_id = bill.id
@@ -179,7 +180,8 @@ def test_verify_payment_nonexistent_bill(client):
 def test_verify_payment_already_paid_bill(client, app):
     """POST /api/pay/verify returns 400 if bill is already paid."""
     with app.app_context():
-        bill = Bill(device_id="device1", excess_l=10.0, amount=1.0, status="paid", razorpay_order_id="ord_paid")
+        device = Device.query.filter_by(name="device1").first()
+        bill = Bill(device_id=device.id, excess_l=10.0, amount=1.0, status="paid", razorpay_order_id="ord_paid")
         db.session.add(bill)
         db.session.commit()
         bill_id = bill.id
@@ -197,7 +199,8 @@ def test_verify_payment_already_paid_bill(client, app):
 def test_verify_payment_mismatched_order_id(client, app):
     """POST /api/pay/verify returns 400 if order_id does not match bill's order ID."""
     with app.app_context():
-        bill = Bill(device_id="device1", excess_l=10.0, amount=1.0, status="unpaid", razorpay_order_id="ord_expected")
+        device = Device.query.filter_by(name="device1").first()
+        bill = Bill(device_id=device.id, excess_l=10.0, amount=1.0, status="unpaid", razorpay_order_id="ord_expected")
         db.session.add(bill)
         db.session.commit()
         bill_id = bill.id
@@ -225,7 +228,8 @@ def test_verify_payment_invalid_signature(mock_razorpay_client, client, app):
     mock_razorpay_client.return_value = mock_instance
 
     with app.app_context():
-        bill = Bill(device_id="device1", excess_l=10.0, amount=1.0, status="unpaid", razorpay_order_id="ord_mock_123")
+        device = Device.query.filter_by(name="device1").first()
+        bill = Bill(device_id=device.id, excess_l=10.0, amount=1.0, status="unpaid", razorpay_order_id="ord_mock_123")
         db.session.add(bill)
         db.session.commit()
         bill_id = bill.id
@@ -257,7 +261,8 @@ def test_verify_payment_success_marks_paid_and_turns_relay_on(mock_razorpay_clie
         process_reading("device1", litres=20.0, total_l=520.0, flow_lpm=2.4)
         assert get_device_state("device1")["relay"] == "OFF"
 
-        bill = Bill.query.filter_by(device_id="device1", status="unpaid").first()
+        device = Device.query.filter_by(name="device1").first()
+        bill = Bill.query.filter_by(device_id=device.id, status="unpaid").first()
         bill.razorpay_order_id = "order_mock_999"
         db.session.commit()
         bill_id = bill.id
@@ -283,4 +288,3 @@ def test_verify_payment_success_marks_paid_and_turns_relay_on(mock_razorpay_clie
         assert bill_check.payment_id == "pay_mock_888"
         # Verify device relay state is turned ON
         assert get_device_state("device1")["relay"] == "ON"
-

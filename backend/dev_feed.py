@@ -30,8 +30,7 @@ def run_dev_feed(device_id="device1", fast=False):
     print("=" * 65)
 
     with app.app_context():
-        from models import db
-        device = db.session.get(Device, device_id)
+        device = Device.query.filter_by(name=device_id).first()
         limit = device.monthly_limit_l if device else 500.0
         rate = device.rate_per_l if device else 0.10
         print(f"Device: {device_id} | Quota Limit: {limit} L | Tariff: Rs {rate:.2f}/L\n")
