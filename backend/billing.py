@@ -8,17 +8,23 @@ except ImportError:
 
 logger = logging.getLogger("billing")
 
-# Gracefully import publish_relay from mqtt_client, fallback to mqtt_stub if not yet present
+# Gracefully import publish_relay and getters from mqtt_client, fallback to mqtt_stub if not yet present
 try:
-    from .mqtt_client import publish_relay
+    from .mqtt_client import publish_relay, get_relay_state, get_device_status, get_last_flow_lpm
 except (ImportError, ModuleNotFoundError):
     try:
         from .mqtt_stub import publish_relay
+        get_relay_state = None
+        get_device_status = None
+        get_last_flow_lpm = None
     except (ImportError, ModuleNotFoundError):
         try:
-            from mqtt_client import publish_relay
+            from mqtt_client import publish_relay, get_relay_state, get_device_status, get_last_flow_lpm
         except (ImportError, ModuleNotFoundError):
             from mqtt_stub import publish_relay
+            get_relay_state = None
+            get_device_status = None
+            get_last_flow_lpm = None
 
 # In-memory device runtime states (latest telemetry & relay state)
 # Structure: { device_id: {"flow_lpm": float, "relay": "ON"|"OFF", "last_seen": datetime} }
@@ -32,7 +38,27 @@ def get_device_state(device_id: str) -> dict:
             "relay": "ON",
             "last_seen": None,
         }
-    return device_states[device_id]
+
+    dev_state = device_states[device_id]
+
+    # Sync with live mqtt_client getters if available
+    if get_relay_state is not None:
+        try:
+            live_relay = get_relay_state(device_id)
+            if live_relay:
+                dev_state["relay"] = live_relay
+        except Exception:
+            pass
+
+    if get_last_flow_lpm is not None:
+        try:
+            live_flow = get_last_flow_lpm(device_id)
+            if live_flow is not None:
+                dev_state["flow_lpm"] = round(float(live_flow), 2)
+        except Exception:
+            pass
+
+    return dev_state
 
 
 def set_device_relay(device_id: str, state: str) -> bool:
@@ -56,6 +82,14 @@ def set_device_relay(device_id: str, state: str) -> bool:
 
 def is_device_online(device_id: str, max_silence_seconds: int = 30) -> bool:
     """Check if the device has transmitted telemetry recently."""
+    if get_device_status is not None:
+        try:
+            status = get_device_status(device_id)
+            if status in ("online", "offline"):
+                return status == "online"
+        except Exception:
+            pass
+
     dev_state = get_device_state(device_id)
     last_seen = dev_state.get("last_seen")
     if not last_seen:
@@ -164,3 +198,4 @@ def process_reading(device_id: str, litres: float, total_l: float, flow_lpm: flo
         "flow_lpm": dev_state["flow_lpm"],
         "bill": bill_created,
     }
+

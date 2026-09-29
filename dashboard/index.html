@@ -17,6 +17,9 @@
   <!-- Chart.js via cdnjs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 
+  <!-- Razorpay Checkout SDK -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
   <!-- App Stylesheet -->
   <link rel="stylesheet" href="style.css">
 </head>
@@ -212,11 +215,12 @@
                 <th>Amount (INR)</th>
                 <th>Status</th>
                 <th>Timestamp</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody id="bills-table-body">
               <tr>
-                <td colspan="6" class="empty-state">
+                <td colspan="7" class="empty-state">
                   <i class="fa-regular fa-folder-open" style="font-size: 1.5rem; display: block; margin-bottom: 8px;"></i>
                   No excess bills generated yet. Consumption is within monthly limits.
                 </td>
@@ -225,6 +229,7 @@
           </table>
         </div>
       </section>
+
 
     </main>
 

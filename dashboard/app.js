@@ -161,6 +161,36 @@
         state.flowRateLpm = 2.4;
       }
       return { success: true, relay: state.relayState };
+    },
+
+    createOrder(billId) {
+      const bill = state.bills.find(b => String(b.id) === String(billId));
+      const amount = bill ? Math.round((bill.amount || 1.0) * 100) : 100;
+      return {
+        success: true,
+        order_id: `order_mock_${billId}_${Date.now()}`,
+        amount: amount,
+        currency: 'INR',
+        key_id: 'rzp_test_mock',
+        bill_id: billId,
+      };
+    },
+
+    verifyPayment(payload) {
+      const bill = state.bills.find(b => String(b.id) === String(payload.bill_id));
+      if (bill) {
+        bill.status = 'paid';
+        bill.payment_id = payload.payment_id || 'pay_mock';
+      }
+      state.relayState = 'ON';
+      state.flowRateLpm = 2.4;
+      return {
+        success: true,
+        message: 'Payment verified successfully. Relay turned ON.',
+        bill_id: payload.bill_id,
+        status: 'paid',
+        relay: 'ON',
+      };
     }
   };
 
@@ -244,7 +274,36 @@
       }
       return await this.request(`/api/bills/${encodeURIComponent(deviceId)}`);
     },
+
+    /**
+     * POST /api/pay/create-order with body {"bill_id": billId}
+     * Returns: Razorpay order details (order_id, amount, currency, key_id)
+     */
+    async createOrder(billId) {
+      if (config.USE_MOCK) {
+        return MockEngine.createOrder(billId);
+      }
+      return await this.request('/api/pay/create-order', {
+        method: 'POST',
+        body: JSON.stringify({ bill_id: billId }),
+      });
+    },
+
+    /**
+     * POST /api/pay/verify with body {"bill_id", "order_id", "payment_id", "signature"}
+     * Returns: verification status and updated relay state
+     */
+    async verifyPayment(payload) {
+      if (config.USE_MOCK) {
+        return MockEngine.verifyPayment(payload);
+      }
+      return await this.request('/api/pay/verify', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
   };
+
 
   /**
    * Field normalization adapter to safely handle minor naming variations from backend
@@ -536,7 +595,7 @@
       if (!bills || bills.length === 0) {
         this.elements.billsTableBody.innerHTML = `
           <tr>
-            <td colspan="6" class="empty-state">
+            <td colspan="7" class="empty-state">
               <i class="fa-regular fa-folder-open" style="font-size: 1.5rem; display: block; margin-bottom: 8px;"></i>
               No excess bills generated yet. Consumption is within monthly limits.
             </td>
@@ -552,6 +611,12 @@
           month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
         });
 
+        const actionHtml = isPaid
+          ? `<span class="paid-check"><i class="fa-solid fa-circle-check"></i> Paid</span>`
+          : `<button class="btn-pay-now" data-bill-id="${b.id}">
+               <i class="fa-solid fa-credit-card"></i> Pay Now
+             </button>`;
+
         return `
           <tr>
             <td><strong>#${b.id}</strong></td>
@@ -560,6 +625,7 @@
             <td><strong>₹${Number(b.amount ?? 0).toFixed(2)}</strong></td>
             <td><span class="status-badge ${badgeClass}">${b.status}</span></td>
             <td style="color: var(--text-muted); font-size: 0.85rem;">${formattedDate}</td>
+            <td>${actionHtml}</td>
           </tr>
         `;
       }).join('');
@@ -588,7 +654,104 @@
   };
 
   /* ==========================================================================
-     6. Polling Engine & Application Lifecycle
+     6. Razorpay Checkout Handler
+     ========================================================================== */
+  async function handlePayNow(billId, payBtn) {
+    if (payBtn) {
+      payBtn.disabled = true;
+      payBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+    }
+
+    try {
+      // 1. Generate Razorpay Order from Backend
+      const orderData = await ApiClient.createOrder(billId);
+      if (!orderData || (!orderData.order_id && !orderData.id)) {
+        throw new Error(orderData.error || 'Failed to generate payment order');
+      }
+
+      const orderId = orderData.order_id || orderData.id;
+      const amount = orderData.amount;
+      const keyId = orderData.key_id;
+
+      // 2. Handle Mock Mode or SDK missing fallback
+      if (config.USE_MOCK || typeof window.Razorpay !== 'function') {
+        const verifyRes = await ApiClient.verifyPayment({
+          bill_id: Number(billId),
+          order_id: orderId,
+          payment_id: 'pay_mock_' + Date.now(),
+          signature: 'sig_mock_verification',
+        });
+
+        if (verifyRes && verifyRes.success) {
+          UI.showAlert('Payment verified successfully! Relay valve turned ON.', 'success');
+          await pollData();
+        } else {
+          throw new Error(verifyRes.error || 'Payment verification failed');
+        }
+        return;
+      }
+
+      // 3. Open official Razorpay Checkout Modal
+      const options = {
+        key: keyId,
+        amount: amount,
+        currency: orderData.currency || 'INR',
+        name: 'Groundwater Meter',
+        description: `Excess Usage Bill #${billId}`,
+        order_id: orderId,
+        handler: async function (response) {
+          try {
+            UI.showAlert('Verifying payment signature with backend...', 'warning');
+            const verifyRes = await ApiClient.verifyPayment({
+              bill_id: Number(billId),
+              order_id: response.razorpay_order_id,
+              payment_id: response.razorpay_payment_id,
+              signature: response.razorpay_signature,
+            });
+
+            if (verifyRes && verifyRes.success) {
+              UI.showAlert('Payment verified! Relay valve turned ON.', 'success');
+              await pollData();
+            } else {
+              throw new Error(verifyRes.error || 'Payment signature verification failed.');
+            }
+          } catch (vErr) {
+            alert(`Payment verification error: ${vErr.message}`);
+            await pollData();
+          }
+        },
+        prefill: {
+          name: 'Groundwater Consumer',
+          email: 'consumer@example.com',
+          contact: '9999999999',
+        },
+        theme: {
+          color: '#06b6d4',
+        },
+        modal: {
+          ondismiss: function () {
+            if (payBtn) {
+              payBtn.disabled = false;
+              payBtn.innerHTML = '<i class="fa-solid fa-credit-card"></i> Pay Now';
+            }
+          },
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+
+    } catch (err) {
+      alert(`Payment Error: ${err.message}`);
+      if (payBtn) {
+        payBtn.disabled = false;
+        payBtn.innerHTML = '<i class="fa-solid fa-credit-card"></i> Pay Now';
+      }
+    }
+  }
+
+  /* ==========================================================================
+     7. Polling Engine & Application Lifecycle
      ========================================================================== */
   async function pollData() {
     UI.elements.syncSpinner.style.animation = 'spin 0.6s linear infinite';
@@ -642,11 +805,23 @@
   }
 
   /* ==========================================================================
-     7. Event Listeners & Interactive Handlers
+     8. Event Listeners & Interactive Handlers
      ========================================================================== */
   function setupEventListeners() {
+    // Event listener for Pay Now buttons in bills table
+    UI.elements.billsTableBody.addEventListener('click', (e) => {
+      const payBtn = e.target.closest('.btn-pay-now');
+      if (!payBtn) return;
+
+      const billId = payBtn.getAttribute('data-bill-id');
+      if (!billId) return;
+
+      handlePayNow(billId, payBtn);
+    });
+
     // Theme toggle
     UI.elements.themeToggleBtn.addEventListener('click', () => {
+
       const nextTheme = state.theme === 'dark' ? 'light' : 'dark';
       UI.setTheme(nextTheme);
     });
