@@ -71,7 +71,7 @@ _reading_handlers: List[Callable[[str, float, float, float], None]] = []
 _mqtt_client: Optional[mqtt.Client] = None
 _db_pool: Optional[ThreadedConnectionPool] = None
 _is_started = False
-_lifecycle_lock = threading.Lock()
+_lifecycle_lock = threading.RLock()
 
 
 # ==============================================================================

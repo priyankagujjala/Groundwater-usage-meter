@@ -49,7 +49,7 @@ def run_dev_feed(device_id="device1", fast=False):
 
         for idx, step in enumerate(steps, 1):
             res = process_reading(
-                device_id=device_id,
+                device_name=device_id,
                 litres=step["litres"],
                 total_l=step["total"],
                 flow_lpm=step["flow"]
