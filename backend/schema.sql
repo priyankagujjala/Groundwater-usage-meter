@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS bills (
     device_id INT NOT NULL REFERENCES devices(id),
     excess_l NUMERIC(12,3) NOT NULL,
     amount NUMERIC(12,2) NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid')),
+    status TEXT NOT NULL DEFAULT 'unpaid' CHECK (status IN ('unpaid', 'paid', 'pending')),
     razorpay_order_id TEXT,
     payment_id TEXT,
     ts TIMESTAMPTZ NOT NULL DEFAULT now()
