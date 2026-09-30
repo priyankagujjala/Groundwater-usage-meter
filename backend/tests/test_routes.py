@@ -153,6 +153,37 @@ def test_create_order_success(mock_razorpay_client, client, app):
         assert updated_bill.razorpay_order_id == "order_mock_12345"
 
 
+@patch("razorpay.Client")
+def test_create_order_minimum_razorpay_amount(mock_razorpay_client, client, app):
+    """Order amount below 100 paise is sent as 100 paise to Razorpay, while DB bill.amount remains 0.05."""
+    mock_instance = MagicMock()
+    mock_instance.order.create.return_value = {"id": "order_mock_small", "amount": 100}
+    mock_razorpay_client.return_value = mock_instance
+
+    with app.app_context():
+        bill = Bill(device_id="device1", excess_l=0.5, amount=0.05, status="unpaid")
+        db.session.add(bill)
+        db.session.commit()
+        bill_id = bill.id
+
+    res = client.post("/api/pay/create-order", json={"bill_id": bill_id})
+    assert res.status_code == 200
+    data = res.get_json()
+
+    assert data["success"] is True
+    assert data["amount"] == 100
+
+    # Verify Razorpay API was called with amount=100
+    mock_instance.order.create.assert_called_once()
+    call_args = mock_instance.order.create.call_args[1]["data"]
+    assert call_args["amount"] == 100
+
+    # Verify DB bill amount remained unchanged at ₹0.05
+    with app.app_context():
+        db_bill = db.session.get(Bill, bill_id)
+        assert db_bill.amount == 0.05
+
+
 def test_verify_payment_missing_fields(client):
     """POST /api/pay/verify returns 400 when required fields are missing."""
     res_empty = client.post("/api/pay/verify", json={})

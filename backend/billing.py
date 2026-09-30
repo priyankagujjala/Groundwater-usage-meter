@@ -141,16 +141,33 @@ def process_reading(device_id: str, litres: float, total_l: float, flow_lpm: flo
     bill_created = None
 
     # 4. Limit and Billing Enforcement Logic:
-    # When total_l crosses monthly_limit_l and there is no unpaid bill for the device:
-    # create a bill (excess_l = total_l - limit, amount = excess_l * rate_per_l, status "unpaid")
-    # exactly once, then call publish_relay(device, "OFF") and set relay to OFF.
-    if total_l >= device.monthly_limit_l:
-        # Check if an unpaid bill already exists
-        existing_unpaid_bill = Bill.query.filter_by(device_id=device_id, status="unpaid").first()
+    # Calculate total excess litres across all readings
+    total_excess_l = max(0.0, round(total_l - device.monthly_limit_l, 2))
 
-        if not existing_unpaid_bill:
-            excess_l = round(total_l - device.monthly_limit_l, 2)
-            # Guarantee minimum measurable excess if at exact boundary
+    # Calculate total excess litres already billed across all existing bills (paid + unpaid)
+    existing_bills = Bill.query.filter_by(device_id=device_id).all()
+    already_billed_excess = sum(b.excess_l for b in existing_bills)
+    new_unbilled_excess = max(0.0, round(total_excess_l - already_billed_excess, 2))
+
+    # Check if an unpaid bill already exists
+    existing_unpaid_bill = next((b for b in existing_bills if b.status == "unpaid"), None)
+
+    if existing_unpaid_bill:
+        # Unpaid bill exists, ensure relay remains OFF
+        if dev_state["relay"] != "OFF":
+            publish_relay(device_id, "OFF")
+            dev_state["relay"] = "OFF"
+            dev_state["flow_lpm"] = 0.0
+        action = "UNPAID_BILL_PENDING_RELAY_OFF"
+    elif total_l >= device.monthly_limit_l:
+        # No unpaid bill exists. Determine whether to create a new bill:
+        # - For first quota crossing (no previous bills exist): create bill for new_unbilled_excess.
+        # - For follow-up bills (previous bills exist): create bill only if new_unbilled_excess >= 10.0 L.
+        is_first_bill = len(existing_bills) == 0
+        should_create_bill = is_first_bill or (new_unbilled_excess >= 10.0)
+
+        if should_create_bill:
+            excess_l = new_unbilled_excess
             if excess_l <= 0.0:
                 excess_l = round(float(litres) if litres > 0 else 0.1, 2)
 
@@ -166,7 +183,7 @@ def process_reading(device_id: str, litres: float, total_l: float, flow_lpm: flo
                 ts=datetime.now(timezone.utc)
             )
             db.session.add(new_bill)
-            db.session.flush() # assign new_bill.id
+            db.session.flush()  # assign new_bill.id
 
             # Cut off relay
             publish_relay(device_id, "OFF")
@@ -179,13 +196,6 @@ def process_reading(device_id: str, litres: float, total_l: float, flow_lpm: flo
                 f"[QUOTA BREACH] Device '{device_id}' exceeded {device.monthly_limit_l}L (Total: {total_l}L). "
                 f"Generated Bill #{new_bill.id} for ₹{amount:.2f} ({excess_l}L excess). Relay turned OFF."
             )
-        else:
-            # Unpaid bill exists, ensure relay remains OFF
-            if dev_state["relay"] != "OFF":
-                publish_relay(device_id, "OFF")
-                dev_state["relay"] = "OFF"
-                dev_state["flow_lpm"] = 0.0
-            action = "UNPAID_BILL_PENDING_RELAY_OFF"
 
     db.session.commit()
 

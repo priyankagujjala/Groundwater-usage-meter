@@ -169,8 +169,8 @@ def create_payment_order():
     key_id = current_app.config.get("RAZORPAY_KEY_ID", "rzp_test_placeholder")
     key_secret = current_app.config.get("RAZORPAY_KEY_SECRET", "rzp_secret_placeholder")
 
-    # Amount in paise (1 INR = 100 paise)
-    amount_paise = int(round(bill.amount * 100))
+    # Amount in paise (1 INR = 100 paise), enforced to minimum 100 paise (₹1) for Razorpay
+    amount_paise = max(int(round(bill.amount * 100)), 100)
 
     try:
         client = razorpay.Client(auth=(key_id, key_secret))
