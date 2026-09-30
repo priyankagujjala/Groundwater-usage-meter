@@ -6,7 +6,7 @@ const CONFIG = {
   // Backend API Base URL (Render/Railway in production, or local Flask)
   API_BASE_URL: 'http://localhost:5000',
 
-  // Mock mode: set to false to connect to the live backend API
+  // Mock mode: set to true to demo/test without a running backend
   USE_MOCK: true,
 
   // Target Device ID as defined in project contract
