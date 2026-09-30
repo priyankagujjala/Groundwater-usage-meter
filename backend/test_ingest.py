@@ -153,10 +153,10 @@ def run_checks() -> int:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT r.id, d.name, r.litres, r.total_l 
+                SELECT r.id, d.id, r.litres, r.total_l 
                 FROM readings r
                 JOIN devices d ON r.device_id = d.id
-                WHERE d.name = %s AND r.total_l = %s
+                WHERE d.id = %s AND r.total_l = %s
                 ORDER BY r.id DESC LIMIT 1;
                 """,
                 (test_device, unique_total)

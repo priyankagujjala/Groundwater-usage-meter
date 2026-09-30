@@ -64,14 +64,14 @@ _state_lock = threading.Lock()
 _relay_states: Dict[str, str] = {}           # device -> 'ON' | 'OFF' (default 'ON')
 _device_statuses: Dict[str, str] = {}       # device -> 'online' | 'offline' | 'unknown'
 _last_flows: Dict[str, Optional[float]] = {} # device -> flow_lpm
-_device_id_cache: Dict[str, int] = {}       # device_name -> integer primary key in DB
+_known_devices_cache: set = set()          # set of valid device_id strings (e.g. 'device1')
 _reading_handlers: List[Callable[[str, float, float, float], None]] = []
 
 # Module singletons
 _mqtt_client: Optional[mqtt.Client] = None
 _db_pool: Optional[ThreadedConnectionPool] = None
 _is_started = False
-_lifecycle_lock = threading.Lock()
+_lifecycle_lock = threading.RLock()
 
 
 # ==============================================================================
@@ -155,30 +155,31 @@ def _execute_db(operation: Callable[[psycopg2.extensions.connection], any]):
             return None
 
 
-def _lookup_device_id(device_name: str) -> Optional[int]:
+def _device_exists(device_id: str) -> bool:
     """
-    Resolves the integer primary key for a device name from cache or DB.
+    Checks if device_id exists in the devices table. Caches valid device IDs in memory.
     """
     with _state_lock:
-        if device_name in _device_id_cache:
-            return _device_id_cache[device_name]
+        if device_id in _known_devices_cache:
+            return True
 
     def _query(conn):
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM devices WHERE name = %s;", (device_name,))
-            row = cur.fetchone()
-            return row[0] if row else None
+            cur.execute("SELECT 1 FROM devices WHERE id = %s;", (device_id,))
+            return cur.fetchone() is not None
 
-    device_pk = _execute_db(_query)
-    if device_pk is not None:
+    exists = _execute_db(_query)
+    if exists:
         with _state_lock:
-            _device_id_cache[device_name] = device_pk
-    return device_pk
+            _known_devices_cache.add(device_id)
+        return True
+    return False
 
 
-def _insert_reading_to_db(device_pk: int, litres: float, total_l: float) -> bool:
+def _insert_reading_to_db(device_id: str, litres: float, total_l: float) -> bool:
     """
     Inserts an ingested telemetry record into PostgreSQL readings table.
+    Uses VARCHAR(64) string device_id matching devices.id.
     """
     def _query(conn):
         with conn.cursor() as cur:
@@ -187,7 +188,7 @@ def _insert_reading_to_db(device_pk: int, litres: float, total_l: float) -> bool
                 INSERT INTO readings (device_id, litres, total_l, ts)
                 VALUES (%s, %s, %s, now());
                 """,
-                (device_pk, litres, total_l)
+                (device_id, litres, total_l)
             )
             return True
 
@@ -270,19 +271,28 @@ def _on_message(client, userdata, msg):
         with _state_lock:
             _last_flows[device_name] = flow_lpm
 
-        # Resolve device primary key from devices table
-        device_pk = _lookup_device_id(device_name)
-        if device_pk is None:
+        # Verify device exists in database devices table
+        if not _device_exists(device_name):
             logger.warning(f"Device '{device_name}' not found in database 'devices' table. Dropping reading.")
             return
 
-        # Persist reading to PostgreSQL
-        saved = _insert_reading_to_db(device_pk, litres, total_l)
+        # Persist reading to PostgreSQL using string device_name (VARCHAR(64))
+        saved = _insert_reading_to_db(device_name, litres, total_l)
         if saved:
             logger.info(
-                f"[INGESTED] Device: {device_name} (id={device_pk}) | "
+                f"[INGESTED] Device: {device_name} | "
                 f"Flow: {flow_lpm:.2f} L/min | Interval: {litres:.3f} L | Total: {total_l:.3f} L"
             )
+
+            # Trigger limit checking and billing logic
+            try:
+                try:
+                    from .billing import process_reading
+                except ImportError:
+                    from billing import process_reading
+                process_reading(device_name, litres, total_l, flow_lpm)
+            except Exception as billing_err:
+                logger.error(f"Error executing billing process_reading: {billing_err}", exc_info=True)
 
             # Invoke registered handlers (e.g. Flask billing/limit triggers)
             with _state_lock:
