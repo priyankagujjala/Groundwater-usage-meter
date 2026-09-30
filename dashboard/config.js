@@ -4,7 +4,7 @@
  */
 const CONFIG = {
   // Backend API Base URL (Render/Railway in production, or local Flask)
-  API_BASE_URL: 'https://aquapulse.onrender.com',
+  API_BASE_URL: 'http://localhost:5000',
 
   // Mock mode: set to false to connect to the live backend API
   USE_MOCK: true,
