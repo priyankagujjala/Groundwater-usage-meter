@@ -1,3 +1,4 @@
+import os
 import logging
 from datetime import datetime, timezone
 from flask import has_app_context
@@ -8,6 +9,9 @@ except ImportError:
     from models import db, Device, Reading, Bill
 
 logger = logging.getLogger("billing")
+
+# Re-billing threshold constant (default: 10.0 Litres)
+MIN_REBILL_L = float(os.getenv("MIN_REBILL_L", "10.0"))
 
 # Gracefully import publish_relay from mqtt_client, fallback to mqtt_stub if not yet present
 try:
@@ -80,6 +84,7 @@ def is_device_online(device_name: str, max_silence_seconds: int = 30) -> bool:
     if not last_seen:
         return False
     now = datetime.now(timezone.utc)
+    # Ensure last_seen is timezone-aware
     if last_seen.tzinfo is None:
         last_seen = last_seen.replace(tzinfo=timezone.utc)
     return (now - last_seen).total_seconds() <= max_silence_seconds
@@ -104,8 +109,8 @@ def process_reading(device_name: str, litres: float, total_l: float, flow_lpm: f
 
 def _execute_process_reading(device_name: str, litres: float, total_l: float, flow_lpm: float) -> dict:
     """
-    Updates runtime state, checks monthly limit threshold, creates bill (once),
-    and enforces relay cut-off.
+    Updates runtime state, checks monthly limit threshold, creates bill (once per interval),
+    accounting for already-billed excess after payments, and enforces relay cut-off.
 
     Note: The reading itself is already persisted by mqtt_client.py (_insert_reading_to_db)
     so it is NOT duplicated here.
@@ -127,44 +132,57 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
     bill_created = None
 
     # 3. Limit and Billing Enforcement Logic:
-    # When total_l crosses monthly_limit_l and there is no unpaid bill for the device:
-    # create a bill (excess_l = total_l - limit, amount = excess_l * rate_per_l, status "unpaid")
-    # exactly once, then call publish_relay(device, "OFF") and set relay to OFF.
     if total_l >= device.monthly_limit_l:
         # Check if an unpaid bill already exists using integer device.id
         existing_unpaid_bill = Bill.query.filter_by(device_id=device.id, status="unpaid").first()
 
         if not existing_unpaid_bill:
-            excess_l = round(total_l - device.monthly_limit_l, 2)
-            # Guarantee minimum measurable excess if at exact boundary
-            if excess_l <= 0.0:
-                excess_l = round(float(litres) if litres > 0 else 0.1, 2)
+            # Calculate total excess already billed across all past bills (paid or unpaid)
+            all_bills = Bill.query.filter_by(device_id=device.id).all()
+            already_billed_l = sum(b.excess_l for b in all_bills)
+            unbilled_excess_l = (total_l - device.monthly_limit_l) - already_billed_l
 
-            amount = round(excess_l * device.rate_per_l, 2)
-            if amount <= 0.0:
-                amount = 0.01
+            should_create_bill = False
+            excess_l_to_bill = 0.0
 
-            new_bill = Bill(
-                device_id=device.id,
-                excess_l=excess_l,
-                amount=amount,
-                status="unpaid",
-                ts=datetime.now(timezone.utc)
-            )
-            db.session.add(new_bill)
-            db.session.flush() # assign new_bill.id
+            if len(all_bills) == 0:
+                # First breach: initial limit crossing
+                should_create_bill = True
+                excess_l_to_bill = round(total_l - device.monthly_limit_l, 2)
+                # Guarantee minimum measurable excess if at exact boundary
+                if excess_l_to_bill <= 0.0:
+                    excess_l_to_bill = round(float(litres) if litres > 0 else 0.1, 2)
+            elif unbilled_excess_l >= MIN_REBILL_L:
+                # Subsequent breach after earlier bill(s) paid and unbilled excess reaches MIN_REBILL_L
+                should_create_bill = True
+                excess_l_to_bill = round(unbilled_excess_l, 2)
 
-            # Cut off relay
-            publish_relay(device_name, "OFF")
-            dev_state["relay"] = "OFF"
-            dev_state["flow_lpm"] = 0.0
+            if should_create_bill:
+                amount = round(excess_l_to_bill * device.rate_per_l, 2)
+                if amount <= 0.0:
+                    amount = 0.01
 
-            action = "LIMIT_BREACHED_BILL_CREATED_RELAY_OFF"
-            bill_created = new_bill.to_dict()
-            logger.warning(
-                f"[QUOTA BREACH] Device '{device_name}' exceeded {device.monthly_limit_l}L (Total: {total_l}L). "
-                f"Generated Bill #{new_bill.id} for ₹{amount:.2f} ({excess_l}L excess). Relay turned OFF."
-            )
+                new_bill = Bill(
+                    device_id=device.id,
+                    excess_l=excess_l_to_bill,
+                    amount=amount,
+                    status="unpaid",
+                    ts=datetime.now(timezone.utc)
+                )
+                db.session.add(new_bill)
+                db.session.flush() # assign new_bill.id
+
+                # Cut off relay
+                publish_relay(device_name, "OFF")
+                dev_state["relay"] = "OFF"
+                dev_state["flow_lpm"] = 0.0
+
+                action = "LIMIT_BREACHED_BILL_CREATED_RELAY_OFF"
+                bill_created = new_bill.to_dict()
+                logger.warning(
+                    f"[QUOTA BREACH] Device '{device_name}' exceeded limit with unbilled excess {excess_l_to_bill:.2f}L (Total: {total_l}L). "
+                    f"Generated Bill #{new_bill.id} for ₹{amount:.2f} ({excess_l_to_bill}L excess). Relay turned OFF."
+                )
         else:
             # Unpaid bill exists, ensure relay remains OFF
             if dev_state["relay"] != "OFF":
