@@ -7,7 +7,7 @@ const CONFIG = {
   API_BASE_URL: 'http://localhost:5000',
 
   // Mock mode: set to false to connect to the live backend API
-  USE_MOCK: false,
+  USE_MOCK: true,
 
   // Target Device ID as defined in project contract
   DEVICE_ID: 'device1',
