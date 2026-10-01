@@ -204,7 +204,8 @@
     async request(endpoint, options = {}) {
       const url = `${config.API_BASE_URL.replace(/\/$/, '')}${endpoint}`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const timeoutMs = options.timeout || 12000;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
         const response = await fetch(url, {
@@ -229,6 +230,9 @@
         return await response.json();
       } catch (err) {
         clearTimeout(timeoutId);
+        if (err.name === 'AbortError' || (err.message && err.message.toLowerCase().includes('abort'))) {
+          throw new Error('Backend is waking up from sleep mode. Please retry in a few seconds.');
+        }
         throw err;
       }
     },
@@ -1089,11 +1093,11 @@
         const rateVal = parseFloat(UI.elements.inputQuotaRate.value);
 
         if (isNaN(limitVal) || limitVal <= 0) {
-          alert('Monthly limit must be a positive number.');
+          UI.showAlert('Monthly limit must be a positive number.', 'warning');
           return;
         }
         if (isNaN(rateVal) || rateVal < 0) {
-          alert('Tariff rate cannot be negative.');
+          UI.showAlert('Tariff rate cannot be negative.', 'warning');
           return;
         }
 
@@ -1105,7 +1109,7 @@
           UI.showAlert(`Quota policy updated: Limit ${limitVal}L, Rate ₹${rateVal}/L`, 'success');
           await pollData();
         } catch (err) {
-          alert(`Failed to update quota: ${err.message}`);
+          UI.showAlert(`Failed to update quota: ${err.message}`, 'danger');
         }
       });
     }
@@ -1113,7 +1117,7 @@
     // Relay Manual Toggle Button (Admin only)
     UI.elements.relayToggleBtn.addEventListener('click', async () => {
       if (state.currentUser.role !== 'admin') {
-        alert('Relay override is restricted to Administrators.');
+        UI.showAlert('Relay override is restricted to Administrators.', 'warning');
         return;
       }
 
@@ -1130,8 +1134,11 @@
         }
         await pollData();
       } catch (err) {
-        alert(`Failed to toggle relay: ${err.message}`);
+        console.warn('[Relay Toggle Error]:', err.message);
+        UI.showAlert(`Unable to switch valve: ${err.message}`, 'warning');
         UI.renderRelay(state.relayState);
+      } finally {
+        UI.elements.relayToggleBtn.disabled = false;
       }
     });
 
