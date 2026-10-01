@@ -508,7 +508,7 @@
       syncSpinner: document.getElementById('sync-spinner'),
     },
 
-    renderUsage(data) {
+    renderUsage(data, hasUnpaidBills = false) {
       const used = Number(data.total).toFixed(1);
       const limit = Number(data.limit);
       const percent = Math.min(Math.round((used / limit) * 100), 100);
@@ -534,12 +534,18 @@
       this.elements.policyExcessLitres.textContent = `${excess.toFixed(1)} L`;
       this.elements.policyExcessAmount.textContent = `₹${excessAmount.toFixed(2)}`;
 
-      // Gauge warning & danger states
+      // Gauge warning, danger, and paid excess states
       if (isOverLimit) {
-        this.elements.gaugeCard.classList.add('gauge-danger');
-        this.elements.gaugeCircle.style.stroke = 'var(--gauge-danger)';
-        this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--danger);">Quota Exceeded by ${excess.toFixed(1)} L</strong>`;
-        this.showAlert(`Monthly limit of ${limit}L exceeded! Motor valve shut off. Pay excess bill to restore flow.`, 'danger');
+        if (hasUnpaidBills) {
+          this.elements.gaugeCard.classList.add('gauge-danger');
+          this.elements.gaugeCircle.style.stroke = 'var(--gauge-danger)';
+          this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--danger);">Quota Exceeded by ${excess.toFixed(1)} L — Bill Unpaid</strong>`;
+          this.showAlert(`Monthly limit of ${limit}L exceeded! Motor valve shut off. Pay excess bill to restore flow.`, 'danger');
+        } else {
+          this.elements.gaugeCard.classList.remove('gauge-danger');
+          this.elements.gaugeCircle.style.stroke = 'var(--accent-cyan)';
+          this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--success);"><i class="fa-solid fa-circle-check"></i> Excess Bill Paid — Flow Active</strong>`;
+        }
       } else if (percent >= 80) {
         this.elements.gaugeCard.classList.remove('gauge-danger');
         this.elements.gaugeCircle.style.stroke = 'var(--gauge-warn)';
@@ -786,24 +792,26 @@
       state.relayState = usage.relay;
       state.deviceStatus = usage.status;
 
-      UI.renderUsage(usage);
-      UI.renderFlow(usage.flow_lpm);
-      UI.renderRelay(usage.relay);
-      UI.renderDeviceStatus(usage.status);
-
-      // 2. Fetch history readings for chart
-      const readings = await ApiClient.getReadings(state.deviceId);
-      state.readingsHistory = readings;
-      ChartEngine.update(readings);
-
-      // 3. Fetch bills
+      // 2. Fetch bills to determine unpaid status
       const bills = await ApiClient.getBills(state.deviceId);
       state.bills = bills;
       UI.renderBills(bills);
 
-      // If online, usage under limit, and no unpaid bills, clear danger alert
       const hasUnpaidBills = bills.some(b => (b.status || '').toLowerCase() === 'unpaid');
-      if (usage.total < usage.limit && !hasUnpaidBills && !state.mockNetworkFail) {
+
+      // 3. Render telemetry & gauge states
+      UI.renderUsage(usage, hasUnpaidBills);
+      UI.renderFlow(usage.flow_lpm);
+      UI.renderRelay(usage.relay);
+      UI.renderDeviceStatus(usage.status);
+
+      // 4. Fetch history readings for chart
+      const readings = await ApiClient.getReadings(state.deviceId);
+      state.readingsHistory = readings;
+      ChartEngine.update(readings);
+
+      // If online and no unpaid bills, clear danger alert
+      if (!hasUnpaidBills && !state.mockNetworkFail) {
         UI.hideAlert();
       }
 
