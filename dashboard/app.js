@@ -1124,6 +1124,15 @@
       }
     });
 
+    // Mock Mode Toolbar: Add +15 L
+    const btnAdd15 = document.getElementById('mock-btn-add-15');
+    if (btnAdd15) {
+      btnAdd15.addEventListener('click', () => {
+        state.totalUsageLitres += 15.0;
+        pollData();
+      });
+    }
+
     // Mock Mode Toolbar: Add +30 L
     const btnAddFlow = document.getElementById('mock-btn-add-flow');
     if (btnAddFlow) {
