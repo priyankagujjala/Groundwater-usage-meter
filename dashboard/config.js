@@ -4,10 +4,10 @@
  */
 const CONFIG = {
   // Backend API Base URL (Render/Railway in production, or local Flask)
-  API_BASE_URL: 'http://localhost:5000',
+  API_BASE_URL: 'https://groundwater-usage-meter.onrender.com',
 
   // Mock mode: set to true to demo/test without a running backend
-  USE_MOCK: true,
+  USE_MOCK: false,
 
   // Target Device ID as defined in project contract
   DEVICE_ID: 'device1',
