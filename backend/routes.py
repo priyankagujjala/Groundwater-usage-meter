@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request, current_app
 import razorpay
 
@@ -332,6 +333,18 @@ def verify_payment():
     # Verification successful: update bill
     bill.status = "paid"
     bill.payment_id = payment_id
+
+    # Reset active usage cycle reading to 0.0 for the device
+    device_obj = bill.device
+    if device_obj:
+        reset_reading = Reading(
+            device_id=device_obj.id,
+            litres=0.0,
+            total_l=0.0,
+            ts=datetime.now(timezone.utc)
+        )
+        db.session.add(reset_reading)
+
     db.session.commit()
 
     # Turn device relay ON (passing device name string 'device1')
@@ -342,10 +355,11 @@ def verify_payment():
 
     return jsonify({
         "success": True,
-        "message": "Payment verified successfully and relay turned ON.",
+        "message": "Payment verified successfully, quota cycle reset, and relay turned ON.",
         "bill_id": bill.id,
         "status": "paid",
         "payment_id": bill.payment_id,
+        "total": 0.0,
         "relay": "ON"
     }), 200
 

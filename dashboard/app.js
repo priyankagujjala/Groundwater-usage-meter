@@ -180,11 +180,12 @@
         bill.status = 'paid';
         bill.payment_id = payload.payment_id || `pay_mock_${Date.now()}`;
       }
+      state.totalUsageLitres = 0.0;
       state.relayState = 'ON';
       state.flowRateLpm = 2.4;
       return {
         success: true,
-        message: 'Mock payment verified successfully.',
+        message: 'Mock payment verified successfully and quota cycle reset.',
         bill_id: payload.bill_id,
         status: 'paid',
         payment_id: bill ? bill.payment_id : 'pay_mock',
@@ -891,7 +892,8 @@
               signature: response.razorpay_signature,
             });
 
-            UI.showAlert(`Payment of ₹${(orderData.amount / 100).toFixed(2)} verified! Relay valve turned ON.`, 'success');
+            UI.showAlert(`Payment of ₹${(orderData.amount / 100).toFixed(2)} verified! Monthly quota cycle reset and relay turned ON.`, 'success');
+            state.totalUsageLitres = 0.0;
             await pollData();
           } catch (verifyErr) {
             console.error('[Payment Verification Error]:', verifyErr);
