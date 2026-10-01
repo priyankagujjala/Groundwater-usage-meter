@@ -21,6 +21,8 @@ class Config:
         SQLALCHEMY_DATABASE_URI = "sqlite:///groundwater.db"
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # Neon closes idle SSL connections: test before use and recycle often
+    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 280}
 
     # MQTT Settings
     MQTT_HOST = os.getenv("MQTT_HOST") or "broker.emqx.io"
