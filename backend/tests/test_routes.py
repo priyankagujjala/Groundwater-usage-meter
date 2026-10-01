@@ -321,3 +321,39 @@ def test_update_device_quota_validation_errors(client):
     # Non-numeric rate
     res_bad_rate = client.post("/api/device/device1/quota", json={"rate_per_l": "invalid"})
     assert res_bad_rate.status_code == 400
+
+
+def test_get_all_bills_admin(client, app):
+    """GET /api/bills returns all bills in the system."""
+    with app.app_context():
+        device = Device(name="dev_admin_test")
+        db.session.add(device)
+        db.session.commit()
+
+        b1 = Bill(device_id=device.id, excess_l=15.0, amount=1.5, status="paid", payment_id="pay_test_1")
+        b2 = Bill(device_id=device.id, excess_l=25.0, amount=2.5, status="unpaid")
+        db.session.add_all([b1, b2])
+        db.session.commit()
+
+    res = client.get("/api/bills")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert len(data) >= 2
+    assert any(b["payment_id"] == "pay_test_1" for b in data)
+
+
+def test_auth_login_endpoints(client):
+    """POST /api/auth/login handles admin and user roles."""
+    # Admin login
+    res_admin = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+    assert res_admin.status_code == 200
+    assert res_admin.get_json()["role"] == "admin"
+
+    # User login
+    res_user = client.post("/api/auth/login", json={"username": "customer", "password": "user123"})
+    assert res_user.status_code == 200
+    assert res_user.get_json()["role"] == "user"
+
+    # Empty username rejected
+    res_bad = client.post("/api/auth/login", json={"username": ""})
+    assert res_bad.status_code == 401

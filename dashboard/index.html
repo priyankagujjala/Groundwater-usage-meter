@@ -57,9 +57,20 @@
           <span id="device-status-text">ONLINE</span>
         </span>
 
+        <!-- Current User Role Badge -->
+        <span class="badge badge-role admin" id="current-role-badge" title="Active Role">
+          <i class="fa-solid fa-user-shield" id="current-role-icon"></i>
+          <span id="current-role-text">Admin</span>
+        </span>
+
         <!-- Light / Dark Theme Switcher -->
         <button class="btn-icon" id="theme-toggle-btn" title="Toggle Light/Dark Theme" aria-label="Toggle Theme">
           <i class="fa-solid fa-moon" id="theme-icon"></i>
+        </button>
+
+        <!-- Switch Account / Log Out Button -->
+        <button class="btn-icon" id="btn-logout" title="Switch Account / Sign Out" aria-label="Sign Out">
+          <i class="fa-solid fa-right-from-bracket"></i>
         </button>
       </div>
     </header>
@@ -150,10 +161,17 @@
             Motor valve is active. Water extraction permitted under monthly quota.
           </p>
 
+          <!-- Admin Relay Manual Toggle Action -->
           <button class="btn-relay-toggle action-turn-off" id="btn-toggle-relay">
             <i class="fa-solid fa-power-off"></i>
             <span id="btn-toggle-relay-text">Turn Relay OFF</span>
           </button>
+
+          <!-- User Locked Notice (Replaces button when logged in as regular user) -->
+          <div class="user-relay-lock" id="user-relay-lock" style="display: none;">
+            <i class="fa-solid fa-lock"></i>
+            <span>Automated Quota System (Manual control reserved for Admin)</span>
+          </div>
         </div>
       </section>
 
@@ -174,8 +192,12 @@
 
       <!-- 5. Tariff & Quota Summary Info -->
       <section class="card col-info" aria-label="Tariff and Limits">
-        <div class="card-header">
+        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
           <h2 class="card-title"><i class="fa-solid fa-receipt"></i> Policy & Billing</h2>
+          <!-- Admin Edit Limits Button -->
+          <button class="btn-pill" id="btn-open-quota-modal" style="display: inline-flex;" title="Edit Quota & Tariff">
+            <i class="fa-solid fa-sliders"></i> Edit Limits
+          </button>
         </div>
 
         <div class="info-list">
@@ -201,7 +223,7 @@
       <!-- 6. Bills & Invoices Table -->
       <section class="card col-bills" aria-label="Billing Invoices">
         <div class="card-header">
-          <h2 class="card-title"><i class="fa-solid fa-file-invoice-dollar"></i> Excess Usage Invoices</h2>
+          <h2 class="card-title" id="bills-card-title"><i class="fa-solid fa-file-invoice-dollar"></i> Excess Usage Invoices & Payment Audit</h2>
           <span style="font-size: 0.8rem; color: var(--text-muted);" id="bills-count">0 bills</span>
         </div>
 
@@ -213,9 +235,9 @@
                 <th>Device</th>
                 <th>Excess Litres</th>
                 <th>Amount (INR)</th>
-                <th>Status</th>
+                <th>Payment Status</th>
                 <th>Timestamp</th>
-                <th>Action</th>
+                <th id="bills-action-header">Action / Payment Reference</th>
               </tr>
             </thead>
             <tbody id="bills-table-body">
@@ -236,7 +258,7 @@
     <aside class="mock-toolbar" id="mock-toolbar">
       <div class="mock-toolbar-title">
         <i class="fa-solid fa-vial-circle-check"></i>
-        <span>Demo & Mock Controls (Member 3 Testing)</span>
+        <span>Demo & Testing Controls</span>
       </div>
       <div class="mock-btn-group">
         <button class="btn-mock" id="mock-btn-add-flow" title="Simulate drawing 30L of water">
@@ -254,6 +276,106 @@
       </div>
     </aside>
 
+  </div>
+
+  <!-- =========================================================================
+       Authentication Modal Overlay
+       ========================================================================= -->
+  <div class="auth-modal-overlay" id="auth-modal-overlay">
+    <div class="auth-card">
+      <div class="auth-header">
+        <div class="auth-logo">
+          <i class="fa-solid fa-droplet"></i>
+        </div>
+        <h2 class="auth-title">Welcome to AquaPulse</h2>
+        <p class="auth-subtitle">Select your portal role to continue</p>
+      </div>
+
+      <!-- Role Selector Tabs -->
+      <div class="role-selector-grid">
+        <button class="role-select-card active" id="btn-select-role-admin" type="button">
+          <div class="role-icon admin">
+            <i class="fa-solid fa-user-shield"></i>
+          </div>
+          <div class="role-meta">
+            <strong>Administrator</strong>
+            <span>Live Telemetry, Relay Override, Quotas & Bill Audit</span>
+          </div>
+        </button>
+
+        <button class="role-select-card" id="btn-select-role-user" type="button">
+          <div class="role-icon user">
+            <i class="fa-solid fa-user"></i>
+          </div>
+          <div class="role-meta">
+            <strong>Consumer / User</strong>
+            <span>Usage Metering, Quota Gauge & Bill Payment</span>
+          </div>
+        </button>
+      </div>
+
+      <form id="auth-login-form" class="auth-form">
+        <div class="form-group">
+          <label for="auth-username" class="form-label">Username</label>
+          <div class="input-with-icon">
+            <i class="fa-solid fa-user input-icon"></i>
+            <input type="text" id="auth-username" class="form-input" placeholder="admin or user" required value="admin">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="auth-password" class="form-label">Password</label>
+          <div class="input-with-icon">
+            <i class="fa-solid fa-lock input-icon"></i>
+            <input type="password" id="auth-password" class="form-input" placeholder="••••••••" value="admin123">
+          </div>
+        </div>
+
+        <div class="auth-error-msg" id="auth-error-msg" style="display: none;"></div>
+
+        <button type="submit" class="btn-primary auth-submit-btn" id="btn-auth-submit">
+          <i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In
+        </button>
+
+        <div class="quick-demo-logins">
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Quick 1-Click Access:</span>
+          <div style="display: flex; gap: 8px; justify-content: center; margin-top: 8px;">
+            <button type="button" class="btn-pill" id="btn-quick-admin">👑 Admin Access</button>
+            <button type="button" class="btn-pill" id="btn-quick-user">👤 User Access</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       Admin Policy & Limit Update Modal
+       ========================================================================= -->
+  <div class="modal-overlay" id="quota-modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title"><i class="fa-solid fa-sliders"></i> Update Quota & Tariff Policy</h3>
+        <button class="btn-icon" id="btn-close-quota-modal" type="button"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="form-update-quota" class="modal-form">
+        <div class="form-group">
+          <label class="form-label" for="input-quota-device">Target Device</label>
+          <input type="text" id="input-quota-device" class="form-input" value="device1" readonly>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="input-quota-limit">Monthly Limit (Litres)</label>
+          <input type="number" id="input-quota-limit" class="form-input" min="1" step="10" placeholder="e.g. 500" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="input-quota-rate">Excess Rate (₹ / Litre)</label>
+          <input type="number" id="input-quota-rate" class="form-input" min="0" step="0.01" placeholder="e.g. 0.10" required>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="btn-cancel-quota">Cancel</button>
+          <button type="submit" class="btn-primary" id="btn-save-quota"><i class="fa-solid fa-check"></i> Save Policy</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- Scripts: Config first, then Core Logic App -->

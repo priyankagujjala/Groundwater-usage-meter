@@ -120,11 +120,35 @@ def toggle_relay(device):
         return jsonify({"error": f"Failed to dispatch relay command: {str(e)}"}), 500
 
 
+@api_bp.route("/api/bills", methods=["GET"])
+def get_all_bills():
+    """
+    GET /api/bills
+    Returns: list of all bills across all devices, newest first (for Admin overview)
+    """
+    bills = Bill.query.order_by(Bill.ts.desc(), Bill.id.desc()).all()
+    bills_list = [
+        {
+            "id": b.id,
+            "device": b.device.name if b.device else f"device_{b.device_id}",
+            "device_id": b.device.name if b.device else f"device_{b.device_id}",
+            "excess_l": round(b.excess_l, 2),
+            "amount": round(b.amount, 2),
+            "status": b.status,
+            "payment_id": b.payment_id,
+            "razorpay_order_id": b.razorpay_order_id,
+            "ts": b.ts.isoformat() if b.ts else None,
+        }
+        for b in bills
+    ]
+    return jsonify(bills_list), 200
+
+
 @api_bp.route("/api/bills/<device>", methods=["GET"])
 def get_bills(device):
     """
     GET /api/bills/<device>
-    Returns: list of {"id", "excess_l", "amount", "status", "ts"}, newest first
+    Returns: list of {"id", "device", "excess_l", "amount", "status", "payment_id", "ts"}, newest first
     """
     device_obj = Device.query.filter_by(name=device).first()
     if not device_obj:
@@ -139,15 +163,53 @@ def get_bills(device):
     bills_list = [
         {
             "id": b.id,
+            "device": b.device.name if b.device else device,
+            "device_id": b.device.name if b.device else device,
             "excess_l": round(b.excess_l, 2),
             "amount": round(b.amount, 2),
             "status": b.status,
+            "payment_id": b.payment_id,
+            "razorpay_order_id": b.razorpay_order_id,
             "ts": b.ts.isoformat() if b.ts else None,
         }
         for b in bills
     ]
 
     return jsonify(bills_list), 200
+
+
+@api_bp.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    """
+    POST /api/auth/login
+    Body: {"username": <str>, "password": <str>}
+    Authenticates user or admin and returns role.
+    """
+    data = request.get_json(silent=True) or {}
+    username = str(data.get("username", "")).strip().lower()
+    password = str(data.get("password", "")).strip()
+
+    if username == "admin" and (password in ("admin123", "admin") or password == ""):
+        return jsonify({
+            "success": True,
+            "role": "admin",
+            "username": "Admin",
+            "device": "device1",
+            "message": "Admin login successful"
+        }), 200
+
+    # Regular user login
+    if username in ("user", "user1", "device1", "customer") or username != "":
+        user_display = username.capitalize() if username else "User"
+        return jsonify({
+            "success": True,
+            "role": "user",
+            "username": user_display,
+            "device": "device1",
+            "message": "User login successful"
+        }), 200
+
+    return jsonify({"error": "Invalid username or credentials"}), 401
 
 
 # ==============================================================================

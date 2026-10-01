@@ -41,6 +41,7 @@
     chartInstance: null,
     theme: localStorage.getItem('aquapulse_theme') || 'dark',
     mockNetworkFail: false,
+    currentUser: JSON.parse(localStorage.getItem('aquapulse_user')) || { role: 'admin', username: 'Admin' },
   };
 
   /* ==========================================================================
@@ -269,7 +270,7 @@
     },
 
     /**
-     * GET /api/bills/<device>
+     * GET /api/bills/<device> (or /api/bills for all devices)
      * Returns: list of bills
      */
     async getBills(deviceId) {
@@ -277,6 +278,49 @@
         return MockEngine.getBills();
       }
       return await this.request(`/api/bills/${encodeURIComponent(deviceId)}`);
+    },
+
+    /**
+     * GET /api/bills
+     * Returns: all bills across devices (admin overview)
+     */
+    async getAllBills() {
+      if (config.USE_MOCK) {
+        return MockEngine.getBills();
+      }
+      return await this.request('/api/bills');
+    },
+
+    /**
+     * POST /api/device/<device>/quota with body {"monthly_limit_l": <num>, "rate_per_l": <num>}
+     */
+    async updateQuota(deviceId, limit, rate) {
+      if (config.USE_MOCK) {
+        state.monthlyLimitLitres = Number(limit);
+        state.ratePerLitre = Number(rate);
+        return { success: true, monthly_limit_l: limit, rate_per_l: rate };
+      }
+      return await this.request(`/api/device/${encodeURIComponent(deviceId)}/quota`, {
+        method: 'POST',
+        body: JSON.stringify({ monthly_limit_l: Number(limit), rate_per_l: Number(rate) }),
+      });
+    },
+
+    /**
+     * POST /api/auth/login with body {"username", "password"}
+     */
+    async login(username, password) {
+      if (config.USE_MOCK) {
+        const u = (username || '').toLowerCase().trim();
+        if (u === 'admin') {
+          return { role: 'admin', username: 'Admin', device: state.deviceId };
+        }
+        return { role: 'user', username: username || 'User', device: state.deviceId };
+      }
+      return await this.request('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      });
     },
 
     /**
@@ -486,6 +530,7 @@
       relayDesc: document.getElementById('relay-desc'),
       relayToggleBtn: document.getElementById('btn-toggle-relay'),
       relayToggleBtnText: document.getElementById('btn-toggle-relay-text'),
+      userRelayLock: document.getElementById('user-relay-lock'),
 
       deviceStatusBadge: document.getElementById('device-status-badge'),
       deviceStatusText: document.getElementById('device-status-text'),
@@ -498,6 +543,8 @@
 
       billsTableBody: document.getElementById('bills-table-body'),
       billsCount: document.getElementById('bills-count'),
+      billsCardTitle: document.getElementById('bills-card-title'),
+      billsActionHeader: document.getElementById('bills-action-header'),
 
       alertBanner: document.getElementById('system-alert-banner'),
       alertMessage: document.getElementById('alert-message'),
@@ -506,6 +553,67 @@
       themeToggleBtn: document.getElementById('theme-toggle-btn'),
       themeIcon: document.getElementById('theme-icon'),
       syncSpinner: document.getElementById('sync-spinner'),
+
+      // Auth & Role Elements
+      authModal: document.getElementById('auth-modal-overlay'),
+      authForm: document.getElementById('auth-login-form'),
+      authUsername: document.getElementById('auth-username'),
+      authPassword: document.getElementById('auth-password'),
+      authErrorMsg: document.getElementById('auth-error-msg'),
+      btnSelectRoleAdmin: document.getElementById('btn-select-role-admin'),
+      btnSelectRoleUser: document.getElementById('btn-select-role-user'),
+      btnQuickAdmin: document.getElementById('btn-quick-admin'),
+      btnQuickUser: document.getElementById('btn-quick-user'),
+      currentRoleBadge: document.getElementById('current-role-badge'),
+      currentRoleIcon: document.getElementById('current-role-icon'),
+      currentRoleText: document.getElementById('current-role-text'),
+      btnLogout: document.getElementById('btn-logout'),
+
+      // Admin Quota Modal
+      btnOpenQuotaModal: document.getElementById('btn-open-quota-modal'),
+      quotaModalOverlay: document.getElementById('quota-modal-overlay'),
+      btnCloseQuotaModal: document.getElementById('btn-close-quota-modal'),
+      btnCancelQuota: document.getElementById('btn-cancel-quota'),
+      formUpdateQuota: document.getElementById('form-update-quota'),
+      inputQuotaDevice: document.getElementById('input-quota-device'),
+      inputQuotaLimit: document.getElementById('input-quota-limit'),
+      inputQuotaRate: document.getElementById('input-quota-rate'),
+    },
+
+    renderRole() {
+      const role = state.currentUser.role || 'admin';
+      const username = state.currentUser.username || (role === 'admin' ? 'Admin' : 'User');
+
+      if (role === 'admin') {
+        if (this.elements.currentRoleBadge) {
+          this.elements.currentRoleBadge.className = 'badge badge-role admin';
+          this.elements.currentRoleBadge.title = `Signed in as Administrator (${username})`;
+        }
+        if (this.elements.currentRoleIcon) this.elements.currentRoleIcon.className = 'fa-solid fa-user-shield';
+        if (this.elements.currentRoleText) this.elements.currentRoleText.textContent = 'Admin';
+        if (this.elements.btnOpenQuotaModal) this.elements.btnOpenQuotaModal.style.display = 'inline-flex';
+        if (this.elements.billsCardTitle) {
+          this.elements.billsCardTitle.innerHTML = '<i class="fa-solid fa-file-invoice-dollar"></i> Excess Usage Invoices & Payment Audit';
+        }
+        if (this.elements.billsActionHeader) {
+          this.elements.billsActionHeader.textContent = 'Action / Payment Reference';
+        }
+      } else {
+        if (this.elements.currentRoleBadge) {
+          this.elements.currentRoleBadge.className = 'badge badge-role user';
+          this.elements.currentRoleBadge.title = `Signed in as ${username}`;
+        }
+        if (this.elements.currentRoleIcon) this.elements.currentRoleIcon.className = 'fa-solid fa-user';
+        if (this.elements.currentRoleText) this.elements.currentRoleText.textContent = username;
+        if (this.elements.btnOpenQuotaModal) this.elements.btnOpenQuotaModal.style.display = 'none';
+        if (this.elements.billsCardTitle) {
+          this.elements.billsCardTitle.innerHTML = '<i class="fa-solid fa-file-invoice-dollar"></i> My Excess Invoices';
+        }
+        if (this.elements.billsActionHeader) {
+          this.elements.billsActionHeader.textContent = 'Action';
+        }
+      }
+      this.renderRelay(state.relayState);
     },
 
     renderUsage(data, hasUnpaidBills = false) {
@@ -571,6 +679,7 @@
 
     renderRelay(relayState) {
       const isOn = relayState.toUpperCase() === 'ON';
+      const isAdmin = (state.currentUser.role || 'admin') === 'admin';
 
       if (isOn) {
         this.elements.relayPill.className = 'relay-status-pill on';
@@ -590,6 +699,15 @@
         this.elements.relayToggleBtnText.textContent = 'Turn Relay ON';
       }
       this.elements.relayToggleBtn.disabled = false;
+
+      // Role permission: Admin has toggle button, User sees automatic system lock
+      if (isAdmin) {
+        this.elements.relayToggleBtn.style.display = 'inline-flex';
+        if (this.elements.userRelayLock) this.elements.userRelayLock.style.display = 'none';
+      } else {
+        this.elements.relayToggleBtn.style.display = 'none';
+        if (this.elements.userRelayLock) this.elements.userRelayLock.style.display = 'flex';
+      }
     },
 
     renderDeviceStatus(status) {
@@ -605,6 +723,7 @@
 
     renderBills(bills) {
       this.elements.billsCount.textContent = `${bills.length} ${bills.length === 1 ? 'bill' : 'bills'}`;
+      const isAdmin = (state.currentUser.role || 'admin') === 'admin';
 
       if (!bills || bills.length === 0) {
         this.elements.billsTableBody.innerHTML = `
@@ -625,16 +744,28 @@
           month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
         });
 
-        const actionHtml = isPaid
-          ? `<span class="paid-badge"><i class="fa-solid fa-circle-check"></i> Paid</span>`
-          : `<button class="btn-pay-now" data-bill-id="${b.id}" aria-label="Pay Bill #${b.id}">
-               <i class="fa-solid fa-credit-card"></i> Pay Now (₹${Number(b.amount ?? 0).toFixed(2)})
-             </button>`;
+        let actionHtml = '';
+        if (isAdmin) {
+          // Admin audit view: shows payment verification and transaction reference (no Pay button)
+          if (isPaid) {
+            const refText = b.payment_id ? `Ref: ${b.payment_id}` : 'Verified & Cleared';
+            actionHtml = `<span class="paid-badge"><i class="fa-solid fa-circle-check"></i> Paid</span> <span class="payment-ref">${refText}</span>`;
+          } else {
+            actionHtml = `<span class="status-badge status-unpaid"><i class="fa-solid fa-clock"></i> Unpaid (Pending)</span>`;
+          }
+        } else {
+          // User consumer view: displays Pay Now checkout button for unpaid bills
+          actionHtml = isPaid
+            ? `<span class="paid-badge"><i class="fa-solid fa-circle-check"></i> Paid</span>`
+            : `<button class="btn-pay-now" data-bill-id="${b.id}" aria-label="Pay Bill #${b.id}">
+                 <i class="fa-solid fa-credit-card"></i> Pay Now (₹${Number(b.amount ?? 0).toFixed(2)})
+               </button>`;
+        }
 
         return `
           <tr>
             <td><strong>#${b.id}</strong></td>
-            <td>${b.device_id || state.deviceId}</td>
+            <td>${b.device || b.device_id || state.deviceId}</td>
             <td>${Number(b.excess_l ?? b.excess_litres ?? 0).toFixed(1)} L</td>
             <td><strong>₹${Number(b.amount ?? 0).toFixed(2)}</strong></td>
             <td><span class="status-badge ${badgeClass}">${b.status}</span></td>
@@ -847,8 +978,125 @@
       UI.hideAlert();
     });
 
-    // Relay Manual Toggle Button
+    // Auth Modal: Switch Account / Sign Out button in header
+    if (UI.elements.btnLogout) {
+      UI.elements.btnLogout.addEventListener('click', () => {
+        openAuthModal();
+      });
+    }
+
+    // Auth Modal: Role Select Tabs
+    if (UI.elements.btnSelectRoleAdmin) {
+      UI.elements.btnSelectRoleAdmin.addEventListener('click', () => {
+        UI.elements.btnSelectRoleAdmin.classList.add('active');
+        UI.elements.btnSelectRoleUser.classList.remove('active');
+        UI.elements.authUsername.value = 'admin';
+        UI.elements.authPassword.value = 'admin123';
+        if (UI.elements.authErrorMsg) UI.elements.authErrorMsg.style.display = 'none';
+      });
+    }
+
+    if (UI.elements.btnSelectRoleUser) {
+      UI.elements.btnSelectRoleUser.addEventListener('click', () => {
+        UI.elements.btnSelectRoleUser.classList.add('active');
+        UI.elements.btnSelectRoleAdmin.classList.remove('active');
+        UI.elements.authUsername.value = 'user';
+        UI.elements.authPassword.value = 'user123';
+        if (UI.elements.authErrorMsg) UI.elements.authErrorMsg.style.display = 'none';
+      });
+    }
+
+    // Quick 1-Click Demo Logins
+    if (UI.elements.btnQuickAdmin) {
+      UI.elements.btnQuickAdmin.addEventListener('click', () => {
+        applyLogin('admin', 'Admin');
+      });
+    }
+
+    if (UI.elements.btnQuickUser) {
+      UI.elements.btnQuickUser.addEventListener('click', () => {
+        applyLogin('user', 'User');
+      });
+    }
+
+    // Auth Form Submission
+    if (UI.elements.authForm) {
+      UI.elements.authForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = UI.elements.authUsername.value.trim();
+        const password = UI.elements.authPassword.value.trim();
+
+        if (UI.elements.authErrorMsg) UI.elements.authErrorMsg.style.display = 'none';
+
+        try {
+          const authRes = await ApiClient.login(username, password);
+          applyLogin(authRes.role || (username.toLowerCase() === 'admin' ? 'admin' : 'user'), authRes.username || username);
+        } catch (err) {
+          // Client-side fallback if backend unavailable
+          const role = username.toLowerCase() === 'admin' ? 'admin' : 'user';
+          applyLogin(role, username.charAt(0).toUpperCase() + username.slice(1));
+        }
+      });
+    }
+
+    // Admin Quota Modal Open
+    if (UI.elements.btnOpenQuotaModal) {
+      UI.elements.btnOpenQuotaModal.addEventListener('click', () => {
+        if (UI.elements.inputQuotaLimit) UI.elements.inputQuotaLimit.value = state.monthlyLimitLitres;
+        if (UI.elements.inputQuotaRate) UI.elements.inputQuotaRate.value = state.ratePerLitre;
+        if (UI.elements.inputQuotaDevice) UI.elements.inputQuotaDevice.value = state.deviceId;
+        if (UI.elements.quotaModalOverlay) UI.elements.quotaModalOverlay.style.display = 'flex';
+      });
+    }
+
+    // Admin Quota Modal Close / Cancel
+    if (UI.elements.btnCloseQuotaModal) {
+      UI.elements.btnCloseQuotaModal.addEventListener('click', () => {
+        if (UI.elements.quotaModalOverlay) UI.elements.quotaModalOverlay.style.display = 'none';
+      });
+    }
+    if (UI.elements.btnCancelQuota) {
+      UI.elements.btnCancelQuota.addEventListener('click', () => {
+        if (UI.elements.quotaModalOverlay) UI.elements.quotaModalOverlay.style.display = 'none';
+      });
+    }
+
+    // Admin Quota Modal Form Submit
+    if (UI.elements.formUpdateQuota) {
+      UI.elements.formUpdateQuota.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const limitVal = parseFloat(UI.elements.inputQuotaLimit.value);
+        const rateVal = parseFloat(UI.elements.inputQuotaRate.value);
+
+        if (isNaN(limitVal) || limitVal <= 0) {
+          alert('Monthly limit must be a positive number.');
+          return;
+        }
+        if (isNaN(rateVal) || rateVal < 0) {
+          alert('Tariff rate cannot be negative.');
+          return;
+        }
+
+        try {
+          await ApiClient.updateQuota(state.deviceId, limitVal, rateVal);
+          state.monthlyLimitLitres = limitVal;
+          state.ratePerLitre = rateVal;
+          if (UI.elements.quotaModalOverlay) UI.elements.quotaModalOverlay.style.display = 'none';
+          UI.showAlert(`Quota policy updated: Limit ${limitVal}L, Rate ₹${rateVal}/L`, 'success');
+          await pollData();
+        } catch (err) {
+          alert(`Failed to update quota: ${err.message}`);
+        }
+      });
+    }
+
+    // Relay Manual Toggle Button (Admin only)
     UI.elements.relayToggleBtn.addEventListener('click', async () => {
+      if (state.currentUser.role !== 'admin') {
+        alert('Relay override is restricted to Administrators.');
+        return;
+      }
+
       const targetState = state.relayState === 'ON' ? 'OFF' : 'ON';
       UI.elements.relayToggleBtn.disabled = true;
       UI.elements.relayToggleBtnText.textContent = 'Updating...';
@@ -867,7 +1115,7 @@
       }
     });
 
-    // Bills Table Pay Now Button Click Delegation
+    // Bills Table Pay Now Button Click Delegation (User role checkout)
     UI.elements.billsTableBody.addEventListener('click', (e) => {
       const payBtn = e.target.closest('.btn-pay-now');
       if (payBtn) {
@@ -924,6 +1172,27 @@
     }
   }
 
+  function openAuthModal() {
+    if (UI.elements.authModal) {
+      UI.elements.authModal.classList.remove('hidden');
+      if (UI.elements.authErrorMsg) UI.elements.authErrorMsg.style.display = 'none';
+    }
+  }
+
+  function applyLogin(role, username) {
+    state.currentUser = {
+      role: role.toLowerCase() === 'admin' ? 'admin' : 'user',
+      username: username || (role === 'admin' ? 'Admin' : 'User')
+    };
+    localStorage.setItem('aquapulse_user', JSON.stringify(state.currentUser));
+    if (UI.elements.authModal) {
+      UI.elements.authModal.classList.add('hidden');
+    }
+    UI.renderRole();
+    UI.renderBills(state.bills);
+    UI.showAlert(`Signed in as ${state.currentUser.role === 'admin' ? 'Administrator' : 'User (' + state.currentUser.username + ')'}`, 'success');
+  }
+
   /* ==========================================================================
      9. Bootstrap Application
      ========================================================================== */
@@ -939,6 +1208,15 @@
       document.getElementById('mock-toolbar').style.display = 'none';
     }
 
+    // Check if user has an existing saved session; if not, open login modal
+    const savedUser = localStorage.getItem('aquapulse_user');
+    if (!savedUser) {
+      openAuthModal();
+    } else {
+      if (UI.elements.authModal) UI.elements.authModal.classList.add('hidden');
+    }
+
+    UI.renderRole();
     ChartEngine.init();
     setupEventListeners();
     startPolling();
