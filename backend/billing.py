@@ -202,3 +202,49 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
         "flow_lpm": dev_state["flow_lpm"],
         "bill": bill_created,
     }
+
+
+def check_and_enforce_billing(device_obj):
+    """
+    Evaluates latest reading for device against its limit.
+    If total_l >= monthly_limit_l and unbilled excess > 0, creates an unpaid bill and sets relay OFF.
+    """
+    latest_reading = (
+        Reading.query.filter_by(device_id=device_obj.id)
+        .order_by(Reading.ts.desc(), Reading.id.desc())
+        .first()
+    )
+    if not latest_reading:
+        return None
+
+    total_l = latest_reading.total_l
+    if total_l >= device_obj.monthly_limit_l:
+        existing_unpaid = Bill.query.filter_by(device_id=device_obj.id, status="unpaid").first()
+        if not existing_unpaid:
+            all_bills = Bill.query.filter_by(device_id=device_obj.id).all()
+            already_billed_l = sum(b.excess_l for b in all_bills)
+            unbilled_excess_l = (total_l - device_obj.monthly_limit_l) - already_billed_l
+            if unbilled_excess_l > 0.01 or len(all_bills) == 0:
+                excess_l_to_bill = round(unbilled_excess_l if len(all_bills) > 0 else (total_l - device_obj.monthly_limit_l), 2)
+                if excess_l_to_bill <= 0.0:
+                    excess_l_to_bill = 0.1
+                amount = round(excess_l_to_bill * device_obj.rate_per_l, 2)
+                if amount <= 0.0:
+                    amount = 0.01
+
+                new_bill = Bill(
+                    device_id=device_obj.id,
+                    excess_l=excess_l_to_bill,
+                    amount=amount,
+                    status="unpaid",
+                    ts=datetime.now(timezone.utc)
+                )
+                db.session.add(new_bill)
+                db.session.commit()
+
+                publish_relay(device_obj.name, "OFF")
+                dev_state = get_device_state(device_obj.name)
+                dev_state["relay"] = "OFF"
+                dev_state["flow_lpm"] = 0.0
+                return new_bill
+    return None

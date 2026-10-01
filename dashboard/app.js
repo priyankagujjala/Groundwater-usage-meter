@@ -97,32 +97,31 @@
         if (state.readingsHistory.length > 30) {
           state.readingsHistory.shift();
         }
+      } else {
+        // Relay is OFF
+        state.flowRateLpm = 0.0;
+      }
 
-        // Check limit threshold breach (> 500 L)
-        if (state.totalUsageLitres >= state.monthlyLimitLitres) {
-          const excess = +(state.totalUsageLitres - state.monthlyLimitLitres).toFixed(2);
-          const amount = +(excess * state.ratePerLitre).toFixed(2);
+      // Check limit threshold breach whenever total >= limit
+      if (state.totalUsageLitres >= state.monthlyLimitLitres) {
+        const excess = +(state.totalUsageLitres - state.monthlyLimitLitres).toFixed(2);
+        const amount = +(excess * state.ratePerLitre).toFixed(2);
 
-          // Check if unpaid bill already exists
-          const existingUnpaid = state.bills.find(b => b.status.toLowerCase() === 'unpaid');
-          if (!existingUnpaid) {
-            state.bills.unshift({
-              id: `INV-${Date.now().toString().slice(-6)}`,
-              device_id: state.deviceId,
-              excess_l: excess > 0 ? excess : 0.5,
-              amount: amount > 0 ? amount : 0.05,
-              status: 'unpaid',
-              ts: new Date().toISOString(),
-            });
-          }
-
+        // Check if unpaid bill already exists
+        const existingUnpaid = state.bills.find(b => (b.status || '').toLowerCase() === 'unpaid');
+        if (!existingUnpaid && excess > 0) {
+          state.bills.unshift({
+            id: `INV-${Date.now().toString().slice(-6)}`,
+            device_id: state.deviceId,
+            excess_l: excess,
+            amount: amount > 0 ? amount : 0.05,
+            status: 'unpaid',
+            ts: new Date().toISOString(),
+          });
           // Automatic valve cutoff
           state.relayState = 'OFF';
           state.flowRateLpm = 0.0;
         }
-      } else {
-        // Relay is OFF
-        state.flowRateLpm = 0.0;
       }
     },
 
@@ -664,15 +663,14 @@
 
       // Gauge warning, danger, and paid excess states
       if (isOverLimit) {
-        if (hasUnpaidBills) {
-          this.elements.gaugeCard.classList.add('gauge-danger');
-          this.elements.gaugeCircle.style.stroke = 'var(--gauge-danger)';
-          this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--danger);">Quota Exceeded by ${excess.toFixed(1)} L — Bill Unpaid</strong>`;
+        this.elements.gaugeCard.classList.add('gauge-danger');
+        this.elements.gaugeCircle.style.stroke = 'var(--gauge-danger)';
+        const hasUnpaid = hasUnpaidBills || (state.bills && state.bills.some(b => (b.status || '').toLowerCase() === 'unpaid'));
+        if (hasUnpaid) {
+          this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--danger);"><i class="fa-solid fa-triangle-exclamation"></i> Limit Breached (+${excess.toFixed(1)} L) — Bill Unpaid</strong>`;
           this.showAlert(`Monthly limit of ${limit}L exceeded! Motor valve shut off. Pay excess bill to restore flow.`, 'danger');
         } else {
-          this.elements.gaugeCard.classList.remove('gauge-danger');
-          this.elements.gaugeCircle.style.stroke = 'var(--accent-cyan)';
-          this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--success);"><i class="fa-solid fa-circle-check"></i> Excess Bill Paid — Flow Active</strong>`;
+          this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--danger);"><i class="fa-solid fa-triangle-exclamation"></i> Limit Breached (+${excess.toFixed(1)} L) — Exceeds Quota</strong>`;
         }
       } else if (percent >= 80) {
         this.elements.gaugeCard.classList.remove('gauge-danger');

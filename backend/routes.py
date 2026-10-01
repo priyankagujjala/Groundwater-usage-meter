@@ -4,10 +4,10 @@ import razorpay
 
 try:
     from .models import db, Device, Reading, Bill
-    from .billing import get_device_state, set_device_relay, is_device_online
+    from .billing import get_device_state, set_device_relay, is_device_online, check_and_enforce_billing
 except ImportError:
     from models import db, Device, Reading, Bill
-    from billing import get_device_state, set_device_relay, is_device_online
+    from billing import get_device_state, set_device_relay, is_device_online, check_and_enforce_billing
 
 logger = logging.getLogger("routes")
 api_bp = Blueprint("api", __name__)
@@ -30,6 +30,9 @@ def get_usage(device):
         device_obj = Device(name=device, monthly_limit_l=500.0, rate_per_l=0.10)
         db.session.add(device_obj)
         db.session.commit()
+
+    # Enforce quota limits and generate bill if exceeded
+    check_and_enforce_billing(device_obj)
 
     # Get latest reading for total usage using integer device_obj.id
     latest_reading = (
@@ -153,6 +156,9 @@ def get_bills(device):
     device_obj = Device.query.filter_by(name=device).first()
     if not device_obj:
         return jsonify([]), 200
+
+    # Ensure unbilled excess generates a bill if quota crossed
+    check_and_enforce_billing(device_obj)
 
     bills = (
         Bill.query.filter_by(device_id=device_obj.id)
@@ -385,6 +391,7 @@ def update_device_quota(device):
             return jsonify({"error": "Invalid 'rate_per_l' format. Must be a numeric value."}), 400
 
     db.session.commit()
+    check_and_enforce_billing(device_obj)
 
     return jsonify({
         "success": True,
