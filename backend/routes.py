@@ -1,3 +1,4 @@
+import logging
 from flask import Blueprint, jsonify, request, current_app
 import razorpay
 
@@ -8,6 +9,7 @@ except ImportError:
     from models import db, Device, Reading, Bill
     from billing import get_device_state, set_device_relay, is_device_online
 
+logger = logging.getLogger("routes")
 api_bp = Blueprint("api", __name__)
 
 @api_bp.route("/health", methods=["GET"])
@@ -106,7 +108,9 @@ def toggle_relay(device):
         db.session.commit()
 
     try:
-        set_device_relay(device, relay_val)
+        res = set_device_relay(device, relay_val, wait_for_ack=True)
+        if not res:
+            logger.warning(f"Relay command '{relay_val}' for device '{device}' was not acknowledged by broker.")
         return jsonify({
             "device": device,
             "relay": relay_val,
@@ -264,7 +268,9 @@ def verify_payment():
 
     # Turn device relay ON (passing device name string 'device1')
     device_name = bill.device.name if bill.device else "device1"
-    set_device_relay(device_name, "ON")
+    res = set_device_relay(device_name, "ON", wait_for_ack=True)
+    if not res:
+        logger.warning(f"Relay ON command after payment for device '{device_name}' was not acknowledged by broker.")
 
     return jsonify({
         "success": True,

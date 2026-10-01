@@ -40,7 +40,7 @@ def get_device_state(device_name: str) -> dict:
     return device_states[device_name]
 
 
-def set_device_relay(device_name: str, state: str) -> bool:
+def set_device_relay(device_name: str, state: str, wait_for_ack: bool = False) -> bool:
     """
     Manually update device relay state and dispatch MQTT command.
     """
@@ -49,14 +49,14 @@ def set_device_relay(device_name: str, state: str) -> bool:
         raise ValueError(f"Invalid relay state: '{state}'. Must be 'ON' or 'OFF'.")
 
     # Publish MQTT command
-    publish_relay(device_name, state_upper)
+    published = publish_relay(device_name, state_upper, wait_for_ack=wait_for_ack)
 
     # Update in-memory state
     dev_state = get_device_state(device_name)
     dev_state["relay"] = state_upper
     if state_upper == "OFF":
         dev_state["flow_lpm"] = 0.0
-    return True
+    return published
 
 
 def is_device_online(device_name: str, max_silence_seconds: int = 30) -> bool:
@@ -172,7 +172,7 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
                 db.session.add(new_bill)
                 db.session.flush() # assign new_bill.id
 
-                # Cut off relay
+                # Cut off relay (defaults to wait_for_ack=False in network thread)
                 publish_relay(device_name, "OFF")
                 dev_state["relay"] = "OFF"
                 dev_state["flow_lpm"] = 0.0
@@ -184,7 +184,7 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
                     f"Generated Bill #{new_bill.id} for ₹{amount:.2f} ({excess_l_to_bill}L excess). Relay turned OFF."
                 )
         else:
-            # Unpaid bill exists, ensure relay remains OFF
+            # Unpaid bill exists, ensure relay remains OFF (defaults to wait_for_ack=False in network thread)
             if dev_state["relay"] != "OFF":
                 publish_relay(device_name, "OFF")
                 dev_state["relay"] = "OFF"

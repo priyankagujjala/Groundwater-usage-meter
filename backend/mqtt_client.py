@@ -213,12 +213,17 @@ def _on_connect(client, userdata, flags, reason_code, properties=None):
         logger.error(f"Connection rejected by broker: rc={rc_val} ({reason_code})")
 
 
+def _on_publish(client, userdata, mid, reason_code, properties=None):
+    logger.info(f"[PUBACK] mid={mid} acknowledged by broker")
+
+
 def _on_disconnect(client, userdata, disconnect_flags, reason_code, properties=None):
     rc_val = getattr(reason_code, "value", reason_code)
+    is_conn = client.is_connected() if hasattr(client, "is_connected") else False
     if rc_val != 0:
-        logger.warning(f"Connection lost (rc={rc_val}: {reason_code}). Automatic reconnect active...")
+        logger.warning(f"Connection lost (connected={is_conn}, rc={rc_val}: {reason_code}). Automatic reconnect active...")
     else:
-        logger.info("Cleanly disconnected from MQTT broker.")
+        logger.warning(f"Disconnected from MQTT broker (connected={is_conn}, rc={rc_val}: {reason_code}).")
 
 
 def _on_message(client, userdata, msg):
@@ -348,6 +353,7 @@ def start_mqtt() -> None:
         client.on_connect = _on_connect
         client.on_disconnect = _on_disconnect
         client.on_message = _on_message
+        client.on_publish = _on_publish
 
         # Automatic reconnect with exponential backoff (1s to 30s)
         client.reconnect_delay_set(min_delay=1, max_delay=30)
@@ -402,7 +408,7 @@ def stop_mqtt() -> None:
         logger.info("MQTT ingestion shutdown complete.")
 
 
-def publish_relay(device: str, state: str) -> bool:
+def publish_relay(device: str, state: str, wait_for_ack: bool = False) -> bool:
     """
     Publishes a relay control command to gw/<device>/cmd with QoS 1 and retain=True.
     Updates the in-memory relay state.
@@ -410,9 +416,11 @@ def publish_relay(device: str, state: str) -> bool:
     Args:
         device (str): Device identifier (e.g. 'device1')
         state (str): Desired state ('ON' or 'OFF')
+        wait_for_ack (bool): If True, wait up to 3.0s for broker publish acknowledgement.
+                            Default False (must be False when called from network thread).
 
     Returns:
-        bool: True if publish was accepted by the client loop, False otherwise. Never raises.
+        bool: True if publish was accepted (or acknowledged if wait_for_ack=True), False otherwise. Never raises.
     """
     try:
         norm_state = str(state).strip().upper()
@@ -425,16 +433,28 @@ def publish_relay(device: str, state: str) -> bool:
 
         client = _mqtt_client
         if client is None:
-            logger.warning(f"Cannot publish relay command: MQTT client is not running.")
+            logger.warning("Cannot publish relay command: MQTT client is not running.")
             return False
+
+        is_conn = client.is_connected() if hasattr(client, "is_connected") else False
+        logger.info(f"[RELAY CMD] Client connected: {is_conn}")
 
         topic = f"gw/{device}/cmd"
         payload = json.dumps({"relay": norm_state})
 
         # retain=True ensures newly connecting / recovering simulators immediately adopt the commanded state
         msg_info = client.publish(topic, payload=payload, qos=1, retain=True)
+        mid = getattr(msg_info, "mid", None)
+        logger.info(f"[RELAY CMD] queued mid={mid} connected={is_conn}")
+
+        if wait_for_ack:
+            try:
+                msg_info.wait_for_publish(timeout=3.0)
+            except Exception as wait_err:
+                logger.warning(f"Exception waiting for publish ack on mid={mid}: {wait_err}")
+            return bool(msg_info.is_published())
+
         if msg_info.rc == mqtt.MQTT_ERR_SUCCESS:
-            logger.info(f"[RELAY CMD] Successfully published {payload} to {topic} (retain=True)")
             return True
         else:
             logger.error(f"Publishing relay command to {topic} returned rc={msg_info.rc}")
