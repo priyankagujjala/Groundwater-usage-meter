@@ -540,6 +540,9 @@
       policyRate: document.getElementById('policy-rate'),
       policyExcessLitres: document.getElementById('policy-excess-litres'),
       policyExcessAmount: document.getElementById('policy-excess-amount'),
+      cardPayActionContainer: document.getElementById('card-pay-action-container'),
+      btnQuickPayCard: document.getElementById('btn-quick-pay-card'),
+      quickPayAmount: document.getElementById('quick-pay-amount'),
 
       billsTableBody: document.getElementById('bills-table-body'),
       billsCount: document.getElementById('bills-count'),
@@ -592,6 +595,7 @@
         if (this.elements.currentRoleIcon) this.elements.currentRoleIcon.className = 'fa-solid fa-user-shield';
         if (this.elements.currentRoleText) this.elements.currentRoleText.textContent = 'Admin';
         if (this.elements.btnOpenQuotaModal) this.elements.btnOpenQuotaModal.style.display = 'inline-flex';
+        if (this.elements.cardPayActionContainer) this.elements.cardPayActionContainer.style.display = 'none';
         if (this.elements.billsCardTitle) {
           this.elements.billsCardTitle.innerHTML = '<i class="fa-solid fa-file-invoice-dollar"></i> Excess Usage Invoices & Payment Audit';
         }
@@ -621,6 +625,7 @@
       const limit = Number(data.limit);
       const percent = Math.min(Math.round((used / limit) * 100), 100);
       const isOverLimit = used >= limit;
+      const isUser = (state.currentUser.role || 'user') === 'user';
 
       // Update Gauge Number & Texts
       this.elements.gaugeUsedText.textContent = used;
@@ -641,6 +646,21 @@
       const excessAmount = excess * data.rate_per_l;
       this.elements.policyExcessLitres.textContent = `${excess.toFixed(1)} L`;
       this.elements.policyExcessAmount.textContent = `₹${excessAmount.toFixed(2)}`;
+
+      // Update Quick Pay Button in Card
+      const unpaidBill = (state.bills || []).find(b => (b.status || '').toLowerCase() === 'unpaid');
+      if (this.elements.cardPayActionContainer) {
+        if (isUser && (hasUnpaidBills || unpaidBill)) {
+          this.elements.cardPayActionContainer.style.display = 'block';
+          const dueAmt = unpaidBill ? Number(unpaidBill.amount) : excessAmount;
+          if (this.elements.quickPayAmount) this.elements.quickPayAmount.textContent = `₹${dueAmt.toFixed(2)}`;
+          if (this.elements.btnQuickPayCard && unpaidBill) {
+            this.elements.btnQuickPayCard.setAttribute('data-bill-id', unpaidBill.id);
+          }
+        } else {
+          this.elements.cardPayActionContainer.style.display = 'none';
+        }
+      }
 
       // Gauge warning, danger, and paid excess states
       if (isOverLimit) {
@@ -1123,6 +1143,19 @@
         initiatePayment(billId, payBtn);
       }
     });
+
+    // Policy & Billing Card Quick Pay Button
+    if (UI.elements.btnQuickPayCard) {
+      UI.elements.btnQuickPayCard.addEventListener('click', () => {
+        const billId = UI.elements.btnQuickPayCard.getAttribute('data-bill-id');
+        if (billId) {
+          initiatePayment(billId, UI.elements.btnQuickPayCard);
+        } else if (state.bills && state.bills.length > 0) {
+          const unpaid = state.bills.find(b => (b.status || '').toLowerCase() === 'unpaid');
+          if (unpaid) initiatePayment(unpaid.id, UI.elements.btnQuickPayCard);
+        }
+      });
+    }
 
     // Mock Mode Toolbar: Add +15 L
     const btnAdd15 = document.getElementById('mock-btn-add-15');
