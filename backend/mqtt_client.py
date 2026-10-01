@@ -71,7 +71,7 @@ _reading_handlers: List[Callable[[str, float, float, float], None]] = []
 _mqtt_client: Optional[mqtt.Client] = None
 _db_pool: Optional[ThreadedConnectionPool] = None
 _is_started = False
-_lifecycle_lock = threading.Lock()
+_lifecycle_lock = threading.RLock()
 
 
 # ==============================================================================
@@ -283,6 +283,16 @@ def _on_message(client, userdata, msg):
                 f"[INGESTED] Device: {device_name} (id={device_pk}) | "
                 f"Flow: {flow_lpm:.2f} L/min | Interval: {litres:.3f} L | Total: {total_l:.3f} L"
             )
+
+            # Trigger limit checking and billing logic
+            try:
+                try:
+                    from .billing import process_reading
+                except ImportError:
+                    from billing import process_reading
+                process_reading(device_name, litres, total_l, flow_lpm)
+            except Exception as billing_err:
+                logger.error(f"Error executing billing process_reading: {billing_err}", exc_info=True)
 
             # Invoke registered handlers (e.g. Flask billing/limit triggers)
             with _state_lock:
