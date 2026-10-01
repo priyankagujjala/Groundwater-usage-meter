@@ -288,3 +288,36 @@ def test_verify_payment_success_marks_paid_and_turns_relay_on(mock_razorpay_clie
         assert bill_check.payment_id == "pay_mock_888"
         # Verify device relay state is turned ON
         assert get_device_state("device1")["relay"] == "ON"
+
+
+def test_update_device_quota_success(client, app):
+    """POST /api/device/<device>/quota updates limit and rate in DB."""
+    res = client.post("/api/device/device1/quota", json={
+        "monthly_limit_l": 1200.0,
+        "rate_per_l": 0.25
+    })
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert data["monthly_limit_l"] == 1200.0
+    assert data["rate_per_l"] == 0.25
+
+    # Verify subsequent GET /api/usage/device1 reflects new limit
+    usage_res = client.get("/api/usage/device1")
+    assert usage_res.status_code == 200
+    assert usage_res.get_json()["limit"] == 1200.0
+
+
+def test_update_device_quota_validation_errors(client):
+    """POST /api/device/<device>/quota returns 400 on invalid input."""
+    # Empty JSON
+    res_empty = client.post("/api/device/device1/quota", json=None)
+    assert res_empty.status_code == 400
+
+    # Negative limit
+    res_neg_limit = client.post("/api/device/device1/quota", json={"monthly_limit_l": -50})
+    assert res_neg_limit.status_code == 400
+
+    # Non-numeric rate
+    res_bad_rate = client.post("/api/device/device1/quota", json={"rate_per_l": "invalid"})
+    assert res_bad_rate.status_code == 400

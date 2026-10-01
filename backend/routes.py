@@ -280,3 +280,54 @@ def verify_payment():
         "payment_id": bill.payment_id,
         "relay": "ON"
     }), 200
+
+
+# ==============================================================================
+# DEVICE QUOTA & POLICY MANAGEMENT ENDPOINT
+# ==============================================================================
+
+@api_bp.route("/api/device/<device>/quota", methods=["POST", "PUT"])
+def update_device_quota(device):
+    """
+    POST/PUT /api/device/<device>/quota
+    Body: {"monthly_limit_l": 1000.0, "rate_per_l": 0.20} (or {"limit": 1000, "rate": 0.20})
+    Updates monthly quota threshold and tariff rate for a device.
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be valid JSON."}), 400
+
+    device_obj = Device.query.filter_by(name=device).first()
+    if not device_obj:
+        device_obj = Device(name=device, monthly_limit_l=500.0, rate_per_l=0.10)
+        db.session.add(device_obj)
+
+    if "monthly_limit_l" in data or "limit" in data:
+        val = data.get("monthly_limit_l", data.get("limit"))
+        try:
+            limit_val = float(val)
+            if limit_val <= 0:
+                return jsonify({"error": "'monthly_limit_l' must be greater than 0."}), 400
+            device_obj.monthly_limit_l = limit_val
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid 'monthly_limit_l' format. Must be a numeric value."}), 400
+
+    if "rate_per_l" in data or "rate" in data:
+        val = data.get("rate_per_l", data.get("rate"))
+        try:
+            rate_val = float(val)
+            if rate_val < 0:
+                return jsonify({"error": "'rate_per_l' cannot be negative."}), 400
+            device_obj.rate_per_l = rate_val
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid 'rate_per_l' format. Must be a numeric value."}), 400
+
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "message": f"Quota and tariff updated for '{device}'.",
+        "device": device,
+        "monthly_limit_l": round(device_obj.monthly_limit_l, 2),
+        "rate_per_l": round(device_obj.rate_per_l, 4),
+    }), 200
