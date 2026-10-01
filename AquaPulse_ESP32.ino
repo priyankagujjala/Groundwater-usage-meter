@@ -4,14 +4,14 @@
 #include <ArduinoJson.h>
 
 /**
- * AquaPulse - ESP32 Firmware for Groundwater Usage Metering & Quota Cutoff
+ * AquaPulse - ESP32 Firmware for Groundwater Usage Metering & Remote Quota Cutoff
  * 
  * Hardware:
  * - ESP32 NodeMCU / DevKit V1
- * - YF-S201 Flow Sensor (Interrupt on GPIO 18)
- * - 5V Relay Module (Control on GPIO 23)
+ * - YF-S201 Hall-Effect Flow Sensor (Interrupt on GPIO 18)
+ * - 5V / 3.3V Relay Module (Control on GPIO 23)
  * 
- * Libraries Required (Install via Arduino Library Manager):
+ * Required Libraries (Install via Arduino IDE Library Manager):
  * 1. PubSubClient by Nick O'Leary
  * 2. ArduinoJson by Benoit Blanchon (v6 or v7)
  */
@@ -31,24 +31,45 @@ const char* DEVICE_ID     = "device1";
 #define FLOW_SENSOR_PIN   18
 #define RELAY_PIN         23
 
-// Calibration Factor for YF-S201: 7.5 pulses/sec = 1 L/min (~450 pulses per Litre)
+// Relay Module Polarity:
+// Most 5V/3.3V Arduino relay modules are Active-LOW (LOW = Relay Energized / Valve Open)
+// Set to false if your relay module is Active-HIGH (HIGH = Relay Energized)
+const bool RELAY_ACTIVE_LOW = true;
+
+// Calibration Factor for YF-S201:
+// 7.5 pulses/sec = 1 L/min (~450 pulses per 1 Litre of water)
 const float CALIBRATION_FACTOR = 7.5; 
 
 // ================= RUNTIME STATE ======================
-volatile int pulseCount = 0;
+volatile unsigned long pulseCount = 0;
+volatile unsigned long lastPulseTime = 0;
 float totalLitres = 0.0;
 unsigned long lastPublishTime = 0;
-bool relayState = true; // true = ON, false = OFF
+bool relayState = true; // true = ON (Valve Open), false = OFF (Valve Shut)
 
 WiFiClientSecure tlsClient;
 PubSubClient mqttClient(tlsClient);
 
-// Interrupt Service Routine for Flow Sensor Pulse Counter
-void IRAM_ATTR pulseCounter() {
-  pulseCount++;
+// Helper function to actuate the physical relay pin according to module polarity
+void applyRelayHardware(bool turnOn) {
+  relayState = turnOn;
+  if (RELAY_ACTIVE_LOW) {
+    digitalWrite(RELAY_PIN, turnOn ? LOW : HIGH);
+  } else {
+    digitalWrite(RELAY_PIN, turnOn ? HIGH : LOW);
+  }
 }
 
-// MQTT Message Callback (Relay Control from Cloud)
+// Interrupt Service Routine for Flow Sensor Pulse Counter with 2ms hardware debounce
+void IRAM_ATTR pulseCounter() {
+  unsigned long nowMicro = micros();
+  if (nowMicro - lastPulseTime > 2000) { // 2ms debounce
+    pulseCount++;
+    lastPulseTime = nowMicro;
+  }
+}
+
+// MQTT Message Callback (Relay Control & Quota Reset from Cloud Backend)
 void callback(char* topic, byte* payload, unsigned int length) {
   String message = "";
   for (unsigned int i = 0; i < length; i++) {
@@ -59,42 +80,67 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print(": ");
   Serial.println(message);
 
-  StaticJsonDocument<200> doc;
+  StaticJsonDocument<256> doc;
   DeserializationError error = deserializeJson(doc, message);
   if (!error && doc.containsKey("relay")) {
     const char* cmd = doc["relay"];
     if (String(cmd) == "ON") {
-      relayState = true;
-      digitalWrite(RELAY_PIN, HIGH); // Valve Open
+      // If turning ON from an OFF state (e.g. bill paid or admin reset), reset local cycle usage counter
+      if (!relayState || doc.containsKey("reset")) {
+        totalLitres = 0.0;
+        Serial.println(">> Quota cycle reset: totalLitres reset to 0.0 L");
+      }
+      applyRelayHardware(true);
       Serial.println(">> Motor/Valve status: OPEN (ON)");
     } else if (String(cmd) == "OFF") {
-      relayState = false;
-      digitalWrite(RELAY_PIN, LOW);  // Valve Shut
-      Serial.println(">> Motor/Valve status: SHUT (OFF)");
+      applyRelayHardware(false);
+      Serial.println(">> Motor/Valve status: SHUT (OFF - Quota Cutoff)");
     }
   }
 }
 
+void connectWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  
+  Serial.print("[Wi-Fi] Connecting to ");
+  Serial.print(WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  
+  unsigned long startAttemptTime = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 15000) {
+    delay(500);
+    Serial.print(".");
+  }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n[Wi-Fi] Connected! IP: " + WiFi.localIP().toString());
+  } else {
+    Serial.println("\n[Wi-Fi] Connection timed out, will retry...");
+  }
+}
+
 void connectMQTT() {
-  while (!mqttClient.connected()) {
-    Serial.print("[MQTT] Connecting to EMQX Cloud...");
-    String clientId = "ESP32-" + String(DEVICE_ID);
+  while (WiFi.status() == WL_CONNECTED && !mqttClient.connected()) {
+    Serial.print("[MQTT] Connecting to EMQX Broker...");
+    String clientId = "AquaPulse-ESP32-" + String(DEVICE_ID) + "-" + String(random(1000, 9999));
     String statusTopic = "gw/" + String(DEVICE_ID) + "/status";
 
     // Last Will & Testament (LWT) for automatic offline status detection
     if (mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASS, statusTopic.c_str(), 1, true, "offline")) {
-      Serial.println(" Connected!");
+      Serial.println(" Connected successfully!");
       
-      // Publish online status
+      // Publish retained online status
       mqttClient.publish(statusTopic.c_str(), "online", true);
 
-      // Subscribe to relay commands
+      // Subscribe to remote relay control commands
       String cmdTopic = "gw/" + String(DEVICE_ID) + "/cmd";
       mqttClient.subscribe(cmdTopic.c_str());
+      Serial.println("[MQTT] Subscribed to " + cmdTopic);
     } else {
       Serial.print(" Failed, rc=");
       Serial.print(mqttClient.state());
-      Serial.println(" retrying in 3 seconds...");
+      Serial.println(" Retrying in 3 seconds...");
       delay(3000);
     }
   }
@@ -102,30 +148,37 @@ void connectMQTT() {
 
 void setup() {
   Serial.begin(115200);
+  delay(500);
+  Serial.println("\n==========================================");
+  Serial.println("  AquaPulse ESP32 Smart Water Meter Init  ");
+  Serial.println("==========================================");
 
+  // Initialize Relay Pin
   pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, HIGH); // Default Open
+  applyRelayHardware(true); // Default Valve OPEN on boot
 
+  // Initialize Flow Sensor Pin with internal pull-up and interrupt
   pinMode(FLOW_SENSOR_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
 
-  // Connect to Wi-Fi
-  Serial.print("Connecting to Wi-Fi");
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWi-Fi connected! IP: " + WiFi.localIP().toString());
+  // Connect to Wi-Fi network
+  connectWiFi();
 
   // Configure Secure TLS MQTT Client
-  tlsClient.setInsecure(); // Skips certificate chain verification for quick onboarding
+  tlsClient.setInsecure(); // Skips manual CA certificate verification for fast deployment
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
   mqttClient.setCallback(callback);
+  mqttClient.setBufferSize(512);
 }
 
 void loop() {
-  if (!mqttClient.connected()) {
+  // Ensure Wi-Fi connection is healthy
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWiFi();
+  }
+
+  // Ensure MQTT connection is healthy
+  if (WiFi.status() == WL_CONNECTED && !mqttClient.connected()) {
     connectMQTT();
   }
   mqttClient.loop();
@@ -133,33 +186,41 @@ void loop() {
   unsigned long now = millis();
   // Telemetry Transmission Cycle (every 5 seconds)
   if (now - lastPublishTime >= 5000) {
-    detachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN));
-    
-    // Calculate Flow Rate in L/min
-    float flowRateLpm = ((1000.0 / (now - lastPublishTime)) * pulseCount) / CALIBRATION_FACTOR;
-    
-    // Calculate Litres in this 5-second interval
-    float deltaLitres = (flowRateLpm / 60.0) * ((now - lastPublishTime) / 1000.0);
-    totalLitres += deltaLitres;
-    
+    noInterrupts();
+    unsigned long currentPulses = pulseCount;
     pulseCount = 0;
-    lastPublishTime = now;
-    attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
+    interrupts();
 
-    // Build JSON payload matching project contract
+    unsigned long elapsedMs = now - lastPublishTime;
+    lastPublishTime = now;
+
+    // Calculate Flow Rate in L/min
+    float flowRateLpm = 0.0;
+    if (elapsedMs > 0 && currentPulses > 0) {
+      flowRateLpm = ((1000.0 / (float)elapsedMs) * (float)currentPulses) / CALIBRATION_FACTOR;
+    }
+
+    // Calculate Litres in this 5-second sampling interval
+    float deltaLitres = (flowRateLpm / 60.0) * ((float)elapsedMs / 1000.0);
+    totalLitres += deltaLitres;
+
+    // Build JSON payload strictly matching backend parser requirements
     StaticJsonDocument<256> doc;
     doc["device"]   = DEVICE_ID;
-    doc["flow_lpm"] = serialized(String(flowRateLpm, 2));
-    doc["litres"]   = serialized(String(deltaLitres, 2));
-    doc["total"]    = serialized(String(totalLitres, 2));
+    doc["flow_lpm"] = round(flowRateLpm * 100.0) / 100.0;
+    doc["litres"]   = round(deltaLitres * 1000.0) / 1000.0;
+    doc["total"]    = round(totalLitres * 1000.0) / 1000.0;
 
     char buffer[256];
     serializeJson(doc, buffer);
 
     String topic = "gw/" + String(DEVICE_ID) + "/usage";
-    mqttClient.publish(topic.c_str(), buffer);
-    
-    Serial.print("[Published Telemetry]: ");
-    Serial.println(buffer);
+    bool published = mqttClient.publish(topic.c_str(), buffer);
+
+    Serial.print("[Telemetry Published] ");
+    Serial.print(topic);
+    Serial.print(" -> ");
+    Serial.print(buffer);
+    Serial.println(published ? " (OK)" : " (FAILED)");
   }
 }
