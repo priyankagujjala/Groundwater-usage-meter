@@ -104,12 +104,13 @@
 
       // Check limit threshold breach whenever total >= limit
       if (state.totalUsageLitres >= state.monthlyLimitLitres) {
-        const excess = +(state.totalUsageLitres - state.monthlyLimitLitres).toFixed(2);
+        const rawExcess = +(state.totalUsageLitres - state.monthlyLimitLitres).toFixed(2);
+        const excess = rawExcess > 0 ? rawExcess : 0.1;
         const amount = +(excess * state.ratePerLitre).toFixed(2);
 
         // Check if unpaid bill already exists
         const existingUnpaid = state.bills.find(b => (b.status || '').toLowerCase() === 'unpaid');
-        if (!existingUnpaid && excess > 0) {
+        if (!existingUnpaid) {
           state.bills.unshift({
             id: `INV-${Date.now().toString().slice(-6)}`,
             device_id: state.deviceId,
@@ -1169,6 +1170,7 @@
     if (btnAdd15) {
       btnAdd15.addEventListener('click', () => {
         state.totalUsageLitres += 15.0;
+        MockEngine.stepSimulation();
         pollData();
       });
     }
@@ -1178,6 +1180,7 @@
     if (btnAddFlow) {
       btnAddFlow.addEventListener('click', () => {
         state.totalUsageLitres += 30.0;
+        MockEngine.stepSimulation();
         pollData();
       });
     }
@@ -1186,9 +1189,10 @@
     const btnTriggerBreach = document.getElementById('mock-btn-trigger-breach');
     if (btnTriggerBreach) {
       btnTriggerBreach.addEventListener('click', () => {
-        state.totalUsageLitres = 502.5;
+        state.totalUsageLitres = Math.max(state.monthlyLimitLitres + 2.5, 502.5);
         state.relayState = 'OFF';
         state.flowRateLpm = 0.0;
+        MockEngine.stepSimulation();
         pollData();
       });
     }
