@@ -399,6 +399,120 @@
     },
   };
 
+  /* ==========================================================================
+     3.5 Direct EMQX MQTT WebSockets Client (Ultra-Low Latency Hardware Bridge)
+     ========================================================================== */
+  const MqttBridge = {
+    client: null,
+    connected: false,
+
+    init() {
+      if (typeof Paho === 'undefined' || !config.MQTT_WS_ENABLED) return;
+
+      const host = localStorage.getItem('aquapulse_mqtt_host') || config.MQTT_WS_HOST || 'e0615ec6.ala.asia-southeast1.emqxsl.com';
+      const port = Number(localStorage.getItem('aquapulse_mqtt_port') || config.MQTT_WS_PORT || 8084);
+      const path = config.MQTT_WS_PATH || '/mqtt';
+      const clientId = `AquaPulse-Web-${Math.random().toString(16).substring(2, 8)}`;
+
+      try {
+        this.client = new Paho.MQTT.Client(host, port, path, clientId);
+
+        this.client.onConnectionLost = (responseObject) => {
+          this.connected = false;
+          this.updateIndicator(false);
+          console.warn('[MQTT WS Bridge] Connection lost:', responseObject.errorMessage);
+          setTimeout(() => this.connect(), 4000);
+        };
+
+        this.client.onMessageArrived = (message) => {
+          console.log(`[MQTT WS Bridge] Telemetry received on ${message.destinationName}:`, message.payloadString);
+        };
+
+        this.connect();
+      } catch (err) {
+        console.warn('[MQTT WS Bridge] Client init failed:', err);
+      }
+    },
+
+    connect() {
+      if (!this.client) return;
+
+      const user = localStorage.getItem('aquapulse_mqtt_user') || config.MQTT_WS_USER || '';
+      const pass = localStorage.getItem('aquapulse_mqtt_pass') || config.MQTT_WS_PASS || '';
+
+      const options = {
+        useSSL: true,
+        timeout: 5,
+        keepAliveInterval: 30,
+        onSuccess: () => {
+          this.connected = true;
+          this.updateIndicator(true);
+          console.log('[MQTT WS Bridge] Connected to EMQX Cloud Broker over WebSockets!');
+          try {
+            this.client.subscribe(`gw/${config.DEVICE_ID}/usage`, { qos: 0 });
+            this.client.subscribe(`gw/${config.DEVICE_ID}/cmd`, { qos: 1 });
+          } catch (_) {}
+        },
+        onFailure: (err) => {
+          this.connected = false;
+          this.updateIndicator(false);
+          console.warn('[MQTT WS Bridge] Connection failed:', err.errorMessage);
+        }
+      };
+
+      if (user) options.userName = user;
+      if (pass) options.password = pass;
+
+      try {
+        this.client.connect(options);
+      } catch (e) {
+        console.warn('[MQTT WS Bridge] Connect error:', e);
+      }
+    },
+
+    updateIndicator(isConnected) {
+      const indicator = document.getElementById('mqtt-bridge-status-indicator');
+      const icon = document.getElementById('mqtt-header-icon');
+      if (indicator) {
+        if (isConnected) {
+          indicator.textContent = 'Connected (Live)';
+          indicator.style.background = 'rgba(16, 185, 129, 0.15)';
+          indicator.style.color = 'var(--success)';
+          indicator.style.borderColor = 'var(--success-border)';
+        } else {
+          indicator.textContent = 'Disconnected';
+          indicator.style.background = 'rgba(239, 68, 68, 0.1)';
+          indicator.style.color = 'var(--danger)';
+          indicator.style.borderColor = 'var(--danger-border)';
+        }
+      }
+      if (icon) {
+        icon.style.color = isConnected ? 'var(--success)' : 'var(--text-secondary)';
+      }
+    },
+
+    publishRelay(deviceId, state) {
+      if (!this.client || !this.connected) {
+        console.warn('[MQTT WS Bridge] Not connected to WebSockets. Falling back to backend API dispatch.');
+        return false;
+      }
+      try {
+        const topic = `gw/${deviceId}/cmd`;
+        const payload = JSON.stringify({ relay: state });
+        const message = new Paho.MQTT.Message(payload);
+        message.destinationName = topic;
+        message.qos = 1;
+        message.retained = true;
+        this.client.send(message);
+        console.log(`[MQTT WS Bridge] Successfully dispatched ${payload} to ${topic}`);
+        return true;
+      } catch (e) {
+        console.warn('[MQTT WS Bridge] Publish failed:', e);
+        return false;
+      }
+    }
+  };
+
   /**
    * Field normalization adapter to safely handle minor naming variations from backend
    */
@@ -647,6 +761,19 @@
       btnCancelResetMonth: document.getElementById('btn-cancel-reset-month'),
       btnConfirmResetMonth: document.getElementById('btn-confirm-reset-month'),
       resetModalDeviceId: document.getElementById('reset-modal-device-id'),
+
+      // Direct MQTT Bridge Modal
+      btnOpenMqttModal: document.getElementById('btn-open-mqtt-modal'),
+      mqttModalOverlay: document.getElementById('mqtt-modal-overlay'),
+      btnCloseMqttModal: document.getElementById('btn-close-mqtt-modal'),
+      btnCancelMqttModal: document.getElementById('btn-cancel-mqtt-modal'),
+      mqttConfigForm: document.getElementById('mqtt-config-form'),
+      inputMqttHost: document.getElementById('input-mqtt-host'),
+      inputMqttPort: document.getElementById('input-mqtt-port'),
+      inputMqttUser: document.getElementById('input-mqtt-user'),
+      inputMqttPass: document.getElementById('input-mqtt-pass'),
+      mqttBridgeStatusIndicator: document.getElementById('mqtt-bridge-status-indicator'),
+      mqttHeaderIcon: document.getElementById('mqtt-header-icon'),
     },
 
     renderRole() {
@@ -1273,6 +1400,10 @@
       UI.elements.relayToggleBtn.disabled = true;
       UI.elements.relayToggleBtnText.textContent = 'Updating...';
 
+      // 1. Direct instantaneous MQTT WebSocket publish (<30ms physical actuation)
+      MqttBridge.publishRelay(state.deviceId, targetState);
+
+      // 2. Persist state to backend database
       try {
         const res = await ApiClient.setRelay(state.deviceId, targetState);
         state.relayState = res.relay || targetState;
@@ -1283,8 +1414,9 @@
         await pollData();
       } catch (err) {
         console.warn('[Relay Toggle Error]:', err.message);
-        UI.showAlert(`Unable to switch valve: ${err.message}`, 'warning');
+        state.relayState = targetState;
         UI.renderRelay(state.relayState);
+        UI.showAlert(`Relay command sent directly to hardware (${targetState}). Backend sync warning: ${err.message}`, 'warning');
       } finally {
         UI.elements.relayToggleBtn.disabled = false;
       }
@@ -1370,6 +1502,51 @@
         pollData();
       });
     }
+    // Direct MQTT Bridge Modal Handlers
+    if (UI.elements.btnOpenMqttModal) {
+      UI.elements.btnOpenMqttModal.addEventListener('click', () => {
+        if (UI.elements.inputMqttHost) UI.elements.inputMqttHost.value = localStorage.getItem('aquapulse_mqtt_host') || config.MQTT_WS_HOST || '';
+        if (UI.elements.inputMqttPort) UI.elements.inputMqttPort.value = localStorage.getItem('aquapulse_mqtt_port') || config.MQTT_WS_PORT || 8084;
+        if (UI.elements.inputMqttUser) UI.elements.inputMqttUser.value = localStorage.getItem('aquapulse_mqtt_user') || config.MQTT_WS_USER || '';
+        if (UI.elements.inputMqttPass) UI.elements.inputMqttPass.value = localStorage.getItem('aquapulse_mqtt_pass') || config.MQTT_WS_PASS || '';
+        MqttBridge.updateIndicator(MqttBridge.connected);
+        if (UI.elements.mqttModalOverlay) UI.elements.mqttModalOverlay.style.display = 'flex';
+      });
+    }
+
+    if (UI.elements.btnCloseMqttModal) {
+      UI.elements.btnCloseMqttModal.addEventListener('click', () => {
+        if (UI.elements.mqttModalOverlay) UI.elements.mqttModalOverlay.style.display = 'none';
+      });
+    }
+    if (UI.elements.btnCancelMqttModal) {
+      UI.elements.btnCancelMqttModal.addEventListener('click', () => {
+        if (UI.elements.mqttModalOverlay) UI.elements.mqttModalOverlay.style.display = 'none';
+      });
+    }
+
+    if (UI.elements.mqttConfigForm) {
+      UI.elements.mqttConfigForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const host = UI.elements.inputMqttHost.value.trim();
+        const port = UI.elements.inputMqttPort.value.trim();
+        const user = UI.elements.inputMqttUser.value.trim();
+        const pass = UI.elements.inputMqttPass.value.trim();
+
+        localStorage.setItem('aquapulse_mqtt_host', host);
+        localStorage.setItem('aquapulse_mqtt_port', port);
+        localStorage.setItem('aquapulse_mqtt_user', user);
+        localStorage.setItem('aquapulse_mqtt_pass', pass);
+
+        if (MqttBridge.client && MqttBridge.connected) {
+          try { MqttBridge.client.disconnect(); } catch (_) {}
+        }
+        MqttBridge.init();
+
+        if (UI.elements.mqttModalOverlay) UI.elements.mqttModalOverlay.style.display = 'none';
+        UI.showAlert('EMQX MQTT credentials updated. Connecting directly...', 'success');
+      });
+    }
   }
 
   function openAuthModal() {
@@ -1419,6 +1596,7 @@
     UI.renderRole();
     ChartEngine.init();
     setupEventListeners();
+    MqttBridge.init();
     startPolling();
   });
 

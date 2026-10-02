@@ -18,7 +18,16 @@ const CONFIG = {
   // Fallback defaults if not supplied by API
   DEFAULT_MONTHLY_LIMIT_L: 500,
   DEFAULT_RATE_PER_L: 0.10, // Rs 0.10 per litre excess
+
+  // Direct MQTT WebSockets Bridge (Enables instantaneous <30ms hardware switching directly from browser)
+  MQTT_WS_ENABLED: true,
+  MQTT_WS_HOST: 'e0615ec6.ala.asia-southeast1.emqxsl.com',
+  MQTT_WS_PORT: 8084,
+  MQTT_WS_PATH: '/mqtt',
+  MQTT_WS_USER: 'simulator_user',
+  MQTT_WS_PASS: 'Sicproject',
 };
 
 // Export to window object for browser access
 window.CONFIG = CONFIG;
+

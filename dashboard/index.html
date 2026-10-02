@@ -63,6 +63,11 @@
           <span id="current-role-text">Admin</span>
         </span>
 
+        <!-- Direct MQTT WebSockets Link Status & Config Button -->
+        <button class="btn-icon" id="btn-open-mqtt-modal" title="Direct EMQX MQTT Bridge Settings" aria-label="MQTT Bridge">
+          <i class="fa-solid fa-tower-broadcast" id="mqtt-header-icon" style="color: var(--text-secondary);"></i>
+        </button>
+
         <!-- Light / Dark Theme Switcher -->
         <button class="btn-icon" id="theme-toggle-btn" title="Toggle Light/Dark Theme" aria-label="Toggle Theme">
           <i class="fa-solid fa-moon" id="theme-icon"></i>
@@ -431,8 +436,60 @@
     </div>
   </div>
 
-  <!-- Scripts: Config first, then Core Logic App -->
-  <script src="config.js?v=3.1"></script>
-  <script src="app.js?v=3.1"></script>
+  <!-- =========================================================================
+       Direct EMQX MQTT WebSockets Settings Modal
+       ========================================================================= -->
+  <div class="modal-overlay" id="mqtt-modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title"><i class="fa-solid fa-tower-broadcast"></i> EMQX Direct MQTT Bridge</h3>
+        <button class="btn-icon" id="btn-close-mqtt-modal" type="button"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="mqtt-config-form">
+        <div class="modal-body" style="padding: 16px 0;">
+          <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 14px; line-height: 1.5;">
+            Allows the browser to directly switch your physical ESP32 relay in real-time (&lt;30ms) via EMQX WebSockets.
+          </p>
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">EMQX Host</label>
+            <input type="text" id="input-mqtt-host" class="form-input" style="width: 100%;" value="e0615ec6.ala.asia-southeast1.emqxsl.com">
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+            <div>
+              <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">WSS Port</label>
+              <input type="number" id="input-mqtt-port" class="form-input" style="width: 100%;" value="8084">
+            </div>
+            <div>
+              <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">Status</label>
+              <div id="mqtt-bridge-status-indicator" style="padding: 8px 12px; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 600; background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid var(--danger-border); text-align: center;">
+                Disconnected
+              </div>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">MQTT Username</label>
+              <input type="text" id="input-mqtt-user" class="form-input" style="width: 100%;" placeholder="simulator_user">
+            </div>
+            <div>
+              <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">MQTT Password</label>
+              <input type="password" id="input-mqtt-pass" class="form-input" style="width: 100%;" placeholder="Password">
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="btn-cancel-mqtt-modal">Close</button>
+          <button type="submit" class="btn-primary" id="btn-save-mqtt-config">
+            <i class="fa-solid fa-floppy-disk"></i> Connect & Save
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scripts: Paho MQTT Client, Config, then Core Logic App -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+  <script src="config.js?v=4.0"></script>
+  <script src="app.js?v=4.0"></script>
 </body>
 </html>
