@@ -281,6 +281,13 @@ def reset_device_litres(device_name: str) -> dict:
         ts=datetime.now(timezone.utc)
     )
     db.session.add(reset_reading)
+
+    # Settle any open unpaid bills
+    unpaid_bills = Bill.query.filter_by(device_id=device.id, status="unpaid").all()
+    for ub in unpaid_bills:
+        ub.status = "paid"
+        ub.payment_id = "admin_reset"
+
     db.session.commit()
 
     # Reset in-memory device state

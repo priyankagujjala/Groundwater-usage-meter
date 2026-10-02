@@ -1177,9 +1177,26 @@
         UI.elements.btnConfirmResetMonth.innerHTML = `<span class="spinner-sm"></span> Resetting...`;
 
         try {
-          await ApiClient.resetLitres(state.deviceId);
+          const res = await ApiClient.resetLitres(state.deviceId);
           state.totalUsageLitres = 0.0;
           state.relayState = 'ON';
+          state.flowRateLpm = 0.0;
+          state.bills = [];
+
+          // Immediately reset UI & Gauge to 0.0 L and Safe Green
+          UI.renderUsage({
+            total: 0.0,
+            limit: state.monthlyLimitLitres,
+            rate_per_l: state.ratePerLitre,
+            flow_lpm: 0.0,
+            relay: 'ON',
+            status: state.deviceStatus
+          }, false);
+          UI.renderFlow(0.0);
+          UI.renderRelay('ON');
+          UI.renderBills([]);
+          UI.hideAlert();
+
           if (UI.elements.resetMonthModalOverlay) UI.elements.resetMonthModalOverlay.style.display = 'none';
           UI.showAlert(`Monthly litres usage for '${state.deviceId}' reset to 0.0 L! Valve opened and gauge turned Green.`, 'success');
           await pollData();
