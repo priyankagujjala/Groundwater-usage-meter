@@ -453,4 +453,26 @@ def get_mqtt_status():
     return jsonify({"error": "MQTT module unavailable"}), 503
 
 
+@api_bp.route("/api/mqtt/reconnect", methods=["POST"])
+def force_mqtt_reconnect():
+    """
+    POST /api/mqtt/reconnect
+    Forces an immediate reconnect to EMQX broker with latest environment credentials.
+    """
+    try:
+        from .mqtt_client import reconnect_mqtt, get_mqtt_info
+    except ImportError:
+        try:
+            from mqtt_client import reconnect_mqtt, get_mqtt_info
+        except ImportError:
+            reconnect_mqtt = None
+            get_mqtt_info = None
+
+    if reconnect_mqtt:
+        reconnect_mqtt()
+        return jsonify(get_mqtt_info()), 200
+    return jsonify({"error": "MQTT module unavailable"}), 503
+
+
+
 

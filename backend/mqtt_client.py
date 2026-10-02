@@ -369,19 +369,27 @@ def start_mqtt() -> None:
 
         logger.info(f"Connecting to MQTT broker at {host}:{port} as '{client_id}'...")
         try:
-            client.connect(host, port, keepalive=60)
             client.loop_start()
+            client.connect_async(host, port, keepalive=60)
             _mqtt_client = client
             _is_started = True
             logger.info("MQTT background ingestion loop started successfully.")
         except Exception as ex:
             logger.error(f"Failed to connect to MQTT broker {host}:{port}: {ex}", exc_info=True)
-            try:
-                client.loop_start()
-                _mqtt_client = client
-                _is_started = True
-            except Exception:
-                pass
+            _mqtt_client = client
+            _is_started = True
+
+
+def reconnect_mqtt() -> bool:
+    """
+    Forces a reconnect of the MQTT background client with fresh credentials.
+    """
+    global _mqtt_client, _is_started
+    with _lifecycle_lock:
+        stop_mqtt()
+        start_mqtt()
+        time.sleep(1)
+        return bool(_mqtt_client and _mqtt_client.is_connected())
 
 
 def stop_mqtt() -> None:
