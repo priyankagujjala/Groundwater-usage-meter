@@ -53,11 +53,16 @@ PubSubClient mqttClient(tlsClient);
 // Helper function to actuate the physical relay pin according to module polarity
 void applyRelayHardware(bool turnOn) {
   relayState = turnOn;
+  int pinLevel = 0;
   if (RELAY_ACTIVE_LOW) {
-    digitalWrite(RELAY_PIN, turnOn ? LOW : HIGH);
+    pinLevel = turnOn ? LOW : HIGH;
   } else {
-    digitalWrite(RELAY_PIN, turnOn ? HIGH : LOW);
+    pinLevel = turnOn ? HIGH : LOW;
   }
+  digitalWrite(RELAY_PIN, pinLevel);
+  Serial.print(">> [GPIO 23] Set to: ");
+  Serial.print(pinLevel == HIGH ? "HIGH (3.3V)" : "LOW (0V)");
+  Serial.println(turnOn ? " -> Relay ENERGIZED (ON / Open)" : " -> Relay DE-ENERGIZED (OFF / Closed)");
 }
 
 // Interrupt Service Routine for Flow Sensor Pulse Counter with 2ms hardware debounce
@@ -69,34 +74,58 @@ void IRAM_ATTR pulseCounter() {
   }
 }
 
-// MQTT Message Callback (Relay Control & Quota Reset from Cloud Backend)
+// MQTT Message Callback (Relay Control & Quota Reset from Cloud Backend or EMQX Test Client)
 void callback(char* topic, byte* payload, unsigned int length) {
   String message = "";
   for (unsigned int i = 0; i < length; i++) {
     message += (char)payload[i];
   }
-  Serial.print("[MQTT] Received command on ");
+  message.trim();
+  
+  Serial.println("\n------------------------------------------");
+  Serial.print("[MQTT] Received command on [");
   Serial.print(topic);
-  Serial.print(": ");
+  Serial.print("]: ");
   Serial.println(message);
 
+  String cmd = "";
+  bool shouldReset = false;
+
+  // 1. Try parsing JSON payload (standard backend format e.g. {"relay":"ON"} or {"relay":"OFF","reset":true})
   StaticJsonDocument<256> doc;
   DeserializationError error = deserializeJson(doc, message);
   if (!error && doc.containsKey("relay")) {
-    const char* cmd = doc["relay"];
-    if (String(cmd) == "ON") {
-      // If turning ON from an OFF state (e.g. bill paid or admin reset), reset local cycle usage counter
-      if (!relayState || doc.containsKey("reset")) {
-        totalLitres = 0.0;
-        Serial.println(">> Quota cycle reset: totalLitres reset to 0.0 L");
-      }
-      applyRelayHardware(true);
-      Serial.println(">> Motor/Valve status: OPEN (ON)");
-    } else if (String(cmd) == "OFF") {
-      applyRelayHardware(false);
-      Serial.println(">> Motor/Valve status: SHUT (OFF - Quota Cutoff)");
+    cmd = String((const char*)doc["relay"]);
+    if (doc.containsKey("reset") && doc["reset"] == true) {
+      shouldReset = true;
+    }
+  } else {
+    // 2. Fallback to raw text string from EMQX Dashboard (e.g. "ON", "OFF", "1", "0")
+    String rawUpper = message;
+    rawUpper.toUpperCase();
+    if (rawUpper == "ON" || rawUpper == "1" || rawUpper == "TRUE" || rawUpper == "OPEN") {
+      cmd = "ON";
+    } else if (rawUpper == "OFF" || rawUpper == "0" || rawUpper == "FALSE" || rawUpper == "CLOSE") {
+      cmd = "OFF";
     }
   }
+
+  if (cmd == "ON") {
+    if (!relayState || shouldReset) {
+      totalLitres = 0.0;
+      Serial.println(">> [QUOTA RESET] totalLitres reset to 0.0 L");
+    }
+    applyRelayHardware(true);
+    Serial.println(">> Relay State: ON (Motor Running)");
+  } else if (cmd == "OFF") {
+    applyRelayHardware(false);
+    Serial.println(">> Relay State: OFF (Motor Cutoff)");
+  } else {
+    Serial.print(">> [WARNING] Unrecognized command format: ");
+    Serial.println(message);
+    Serial.println(">> Expected JSON: {\"relay\":\"ON\"} or plain text: ON / OFF");
+  }
+  Serial.println("------------------------------------------\n");
 }
 
 void connectWiFi() {
