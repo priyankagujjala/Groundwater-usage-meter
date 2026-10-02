@@ -73,8 +73,8 @@ def test_post_payment_readings_below_rebill_threshold_create_no_bill_and_keep_re
         set_device_relay("device1", "ON")
         assert get_device_state("device1")["relay"] == "ON"
 
-        # 3. Next readings a few litres higher (518.0 L -> only 3.0 L unbilled excess, < 10.0 L MIN_REBILL_L)
-        res = process_reading("device1", litres=3.0, total_l=518.0, flow_lpm=2.4)
+        # 3. Next readings a fraction of a litre higher (515.5 L -> only 0.5 L unbilled excess, < 1.0 L MIN_REBILL_L)
+        res = process_reading("device1", litres=0.5, total_l=515.5, flow_lpm=2.4)
 
         # Assert no new bill and relay remains ON
         assert res["action"] == "RECORDED"
@@ -90,7 +90,7 @@ def test_post_payment_readings_below_rebill_threshold_create_no_bill_and_keep_re
 
 def test_unbilled_excess_reaching_rebill_threshold_creates_bill_for_only_new_litres(app):
     """
-    (c) Once unbilled excess reaches MIN_REBILL_L (10 L), exactly one new bill
+    (c) Once unbilled excess reaches MIN_REBILL_L (1.0 L), exactly one new bill
     is created whose excess_l equals ONLY the new unbilled litres.
     """
     with app.app_context():
@@ -106,17 +106,17 @@ def test_unbilled_excess_reaching_rebill_threshold_creates_bill_for_only_new_lit
         db.session.commit()
         set_device_relay("device1", "ON")
 
-        # 3. Usage reaches 530.0 L (unbilled excess = (530 - 500) - 20 = 10.0 L == MIN_REBILL_L)
+        # 3. Usage reaches 521.0 L (unbilled excess = (521 - 500) - 20 = 1.0 L == MIN_REBILL_L)
         with patch("backend.billing.publish_relay") as mock_publish:
-            res = process_reading("device1", litres=10.0, total_l=530.0, flow_lpm=2.4)
+            res = process_reading("device1", litres=1.0, total_l=521.0, flow_lpm=2.4)
 
-            # Assert new bill is for exactly 10.0 L (not 30.0 L!) and relay is cut OFF
+            # Assert new bill is for exactly 1.0 L (not 21.0 L!) and relay is cut OFF
             mock_publish.assert_called_once_with("device1", "OFF")
             assert res["action"] == "LIMIT_BREACHED_BILL_CREATED_RELAY_OFF"
             assert res["relay"] == "OFF"
             assert res["bill"] is not None
-            assert res["bill"]["excess_l"] == 10.0
-            assert res["bill"]["amount"] == 1.00 # 10.0 L * 0.10 Rs/L
+            assert res["bill"]["excess_l"] == 1.0
+            assert res["bill"]["amount"] == 0.10 # 1.0 L * 0.10 Rs/L
             assert res["bill"]["status"] == "unpaid"
 
             # DB check: 2 total bills (1 paid, 1 unpaid)
@@ -124,7 +124,7 @@ def test_unbilled_excess_reaching_rebill_threshold_creates_bill_for_only_new_lit
             assert len(all_bills) == 2
             assert all_bills[0].excess_l == 20.0
             assert all_bills[0].status == "paid"
-            assert all_bills[1].excess_l == 10.0
+            assert all_bills[1].excess_l == 1.0
             assert all_bills[1].status == "unpaid"
 
 

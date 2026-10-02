@@ -202,10 +202,10 @@
       <section class="card col-info" aria-label="Tariff and Limits">
         <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
           <h2 class="card-title"><i class="fa-solid fa-receipt"></i> Policy & Billing</h2>
-          <!-- Admin Actions: Reset Month & Edit Limits -->
+          <!-- Admin Actions: Reset Litres & Edit Limits -->
           <div style="display: flex; gap: 6px; align-items: center;">
-            <button class="btn-pill btn-admin-reset-month" id="btn-open-reset-month-modal" style="display: inline-flex;" title="Reset Month Quota Cycle (Admin)">
-              <i class="fa-solid fa-arrows-rotate"></i> Reset Month
+            <button class="btn-pill btn-admin-reset-month" id="btn-open-reset-month-modal" style="display: inline-flex;" title="Reset Monthly Litres Usage (Admin)">
+              <i class="fa-solid fa-arrows-rotate"></i> Reset Litres
             </button>
             <button class="btn-pill" id="btn-open-quota-modal" style="display: inline-flex;" title="Edit Quota & Tariff">
               <i class="fa-solid fa-sliders"></i> Edit Limits
@@ -401,17 +401,17 @@
   </div>
 
   <!-- =========================================================================
-       Admin Reset Month Cycle Confirmation Modal
+       Admin Reset Litres Usage Confirmation Modal
        ========================================================================= -->
   <div class="modal-overlay" id="reset-month-modal-overlay" style="display: none;">
     <div class="modal-card">
       <div class="modal-header">
-        <h3 class="modal-title"><i class="fa-solid fa-arrows-rotate"></i> Reset Monthly Quota Cycle</h3>
+        <h3 class="modal-title"><i class="fa-solid fa-arrows-rotate"></i> Reset Monthly Litres Usage</h3>
         <button class="btn-icon" id="btn-close-reset-modal" type="button"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body" style="padding: 16px 0;">
         <p style="color: var(--text-primary); margin-bottom: 12px; font-size: 0.95rem;">
-          Are you sure you want to <strong>reset the monthly cycle</strong> for <strong id="reset-modal-device-id" style="color: var(--accent-cyan);">device1</strong>?
+          Are you sure you want to <strong>reset the litres usage for this month</strong> on <strong id="reset-modal-device-id" style="color: var(--accent-cyan);">device1</strong>?
         </p>
         <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid var(--success-border); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px;">
           <ul style="color: var(--text-secondary); font-size: 0.85rem; padding-left: 18px; line-height: 1.6;">
@@ -425,14 +425,14 @@
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="btn-cancel-reset-month">Cancel</button>
         <button type="button" class="btn-primary" id="btn-confirm-reset-month" style="background: var(--success); border-color: var(--success);">
-          <i class="fa-solid fa-rotate"></i> Confirm Reset Month
+          <i class="fa-solid fa-rotate"></i> Confirm Reset Litres
         </button>
       </div>
     </div>
   </div>
 
   <!-- Scripts: Config first, then Core Logic App -->
-  <script src="config.js?v=2.0"></script>
-  <script src="app.js?v=2.0"></script>
+  <script src="config.js?v=3.0"></script>
+  <script src="app.js?v=3.0"></script>
 </body>
 </html>

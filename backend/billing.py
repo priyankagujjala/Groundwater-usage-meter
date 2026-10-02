@@ -10,8 +10,8 @@ except ImportError:
 
 logger = logging.getLogger("billing")
 
-# Re-billing threshold constant (default: 10.0 Litres)
-MIN_REBILL_L = float(os.getenv("MIN_REBILL_L", "10.0"))
+# Re-billing threshold constant (generates a new bill for every 1.0 Litre after the limit)
+MIN_REBILL_L = float(os.getenv("MIN_REBILL_L", "1.0"))
 
 # Gracefully import publish_relay from mqtt_client, fallback to mqtt_stub if not yet present
 try:
@@ -261,12 +261,12 @@ def check_and_enforce_billing(device_obj):
     return None
 
 
-def reset_device_month(device_name: str) -> dict:
+def reset_device_litres(device_name: str) -> dict:
     """
-    Resets the monthly usage cycle for a device:
-    1. Records a 0.0L reading to reset the cycle usage counter to 0.
+    Resets the monthly usage litres counter for a device:
+    1. Records a 0.0L reading to reset the usage counter for this month to 0.
     2. Restores in-memory relay state to 'ON' and clears flow rate.
-    3. Dispatches MQTT command with reset: true so ESP32 local counter resets and valve opens.
+    3. Dispatches MQTT command with reset: true so ESP32 local hardware counter resets and valve opens.
     """
     device = Device.query.filter_by(name=device_name).first()
     if not device:
@@ -294,12 +294,17 @@ def reset_device_month(device_name: str) -> dict:
     except TypeError:
         publish_relay(device_name, "ON", wait_for_ack=True)
 
-    logger.info(f"[MONTH RESET] Device '{device_name}' monthly cycle reset to 0.0L. Relay turned ON.")
+    logger.info(f"[LITRES RESET] Device '{device_name}' monthly litres reset to 0.0L. Relay turned ON.")
     return {
         "success": True,
         "device": device_name,
         "total": 0.0,
         "relay": "ON",
-        "message": f"Monthly cycle for '{device_name}' has been successfully reset to 0.0 L."
+        "message": f"Monthly litres usage for '{device_name}' has been successfully reset to 0.0 L."
     }
+
+
+# Backwards compatibility alias
+reset_device_month = reset_device_litres
+
 

@@ -416,19 +416,21 @@ def update_device_quota(device):
     }), 200
 
 
+@api_bp.route("/api/device/<device>/reset-litres", methods=["POST"])
 @api_bp.route("/api/device/<device>/reset-month", methods=["POST"])
-def admin_reset_month(device):
+def admin_reset_litres(device):
     """
-    POST /api/device/<device>/reset-month
-    Admin endpoint to reset current monthly billing cycle:
-    1. Sets usage to 0.0 Litres.
-    2. Opens relay valve and sends MQTT reset signal to ESP32.
-    3. Resets gauge to 0 and green.
+    POST /api/device/<device>/reset-litres
+    Admin endpoint to reset current month's water litres consumption:
+    1. Sets monthly litres usage to 0.0 Litres.
+    2. Opens relay valve and sends MQTT reset signal to ESP32 hardware.
+    3. Resets gauge to 0% and turns it Green.
     """
     try:
         result = reset_device_month(device)
         return jsonify(result), 200
     except Exception as e:
-        logger.error(f"Failed to reset monthly cycle for '{device}': {e}", exc_info=True)
-        return jsonify({"error": f"Failed to reset month: {str(e)}"}), 500
+        logger.error(f"Failed to reset monthly litres for '{device}': {e}", exc_info=True)
+        return jsonify({"error": f"Failed to reset litres: {str(e)}"}), 500
+
 

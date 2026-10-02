@@ -104,17 +104,19 @@
 
       // Check limit threshold breach whenever total >= limit
       if (state.totalUsageLitres >= state.monthlyLimitLitres) {
-        const rawExcess = +(state.totalUsageLitres - state.monthlyLimitLitres).toFixed(2);
-        const excess = rawExcess > 0 ? rawExcess : 0.1;
-        const amount = +(excess * state.ratePerLitre).toFixed(2);
+        const excessTotal = +(state.totalUsageLitres - state.monthlyLimitLitres).toFixed(2);
+        const previouslyBilled = state.bills.reduce((sum, b) => sum + Number(b.excess_l || 0), 0);
+        const unbilledExcess = +(excessTotal - previouslyBilled).toFixed(2);
 
-        // Check if unpaid bill already exists
-        const existingUnpaid = state.bills.find(b => (b.status || '').toLowerCase() === 'unpaid');
-        if (!existingUnpaid) {
+        // Generate bill on quota breach and for every 1.0 L excess accumulated after
+        if (state.bills.length === 0 || unbilledExcess >= 1.0) {
+          const excessToBill = unbilledExcess >= 1.0 ? unbilledExcess : (excessTotal > 0 ? excessTotal : 0.1);
+          const amount = +(excessToBill * state.ratePerLitre).toFixed(2);
+
           state.bills.unshift({
             id: `INV-${Date.now().toString().slice(-6)}`,
             device_id: state.deviceId,
-            excess_l: excess,
+            excess_l: excessToBill,
             amount: amount > 0 ? amount : 0.05,
             status: 'unpaid',
             ts: new Date().toISOString(),
@@ -194,7 +196,7 @@
       };
     },
 
-    resetMonth() {
+    resetLitres() {
       state.totalUsageLitres = 0.0;
       state.relayState = 'ON';
       state.flowRateLpm = 2.4;
@@ -204,8 +206,12 @@
         success: true,
         total: 0.0,
         relay: 'ON',
-        message: 'Monthly cycle reset successfully.'
+        message: "Current month's usage litres reset to 0.0 L."
       };
+    },
+
+    resetMonth() {
+      return this.resetLitres();
     }
   };
 
@@ -326,16 +332,20 @@
     },
 
     /**
-     * POST /api/device/<device>/reset-month
-     * Admin method to reset monthly quota cycle to 0.0 Litres and turn valve ON
+     * POST /api/device/<device>/reset-litres
+     * Admin method to reset monthly usage litres to 0.0 Litres and turn valve ON
      */
-    async resetMonth(deviceId) {
+    async resetLitres(deviceId) {
       if (config.USE_MOCK) {
-        return MockEngine.resetMonth();
+        return MockEngine.resetLitres();
       }
-      return await this.request(`/api/device/${encodeURIComponent(deviceId)}/reset-month`, {
+      return await this.request(`/api/device/${encodeURIComponent(deviceId)}/reset-litres`, {
         method: 'POST',
       });
+    },
+
+    async resetMonth(deviceId) {
+      return this.resetLitres(deviceId);
     },
 
     /**
@@ -1155,11 +1165,11 @@
       });
     }
 
-    // Admin Month Reset Modal Confirm Action
+    // Admin Reset Litres Modal Confirm Action
     if (UI.elements.btnConfirmResetMonth) {
       UI.elements.btnConfirmResetMonth.addEventListener('click', async () => {
         if (state.currentUser.role !== 'admin') {
-          UI.showAlert('Monthly reset is restricted to Administrators.', 'warning');
+          UI.showAlert('Resetting litres is restricted to Administrators.', 'warning');
           return;
         }
 
@@ -1167,17 +1177,17 @@
         UI.elements.btnConfirmResetMonth.innerHTML = `<span class="spinner-sm"></span> Resetting...`;
 
         try {
-          await ApiClient.resetMonth(state.deviceId);
+          await ApiClient.resetLitres(state.deviceId);
           state.totalUsageLitres = 0.0;
           state.relayState = 'ON';
           if (UI.elements.resetMonthModalOverlay) UI.elements.resetMonthModalOverlay.style.display = 'none';
-          UI.showAlert(`Monthly cycle for '${state.deviceId}' reset successfully! Usage reset to 0 L and gauge turned Green.`, 'success');
+          UI.showAlert(`Monthly litres usage for '${state.deviceId}' reset to 0.0 L! Valve opened and gauge turned Green.`, 'success');
           await pollData();
         } catch (err) {
-          UI.showAlert(`Failed to reset month: ${err.message}`, 'danger');
+          UI.showAlert(`Failed to reset litres: ${err.message}`, 'danger');
         } finally {
           UI.elements.btnConfirmResetMonth.disabled = false;
-          UI.elements.btnConfirmResetMonth.innerHTML = `<i class="fa-solid fa-rotate"></i> Confirm Reset Month`;
+          UI.elements.btnConfirmResetMonth.innerHTML = `<i class="fa-solid fa-rotate"></i> Confirm Reset Litres`;
         }
       });
     }
