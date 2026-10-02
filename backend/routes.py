@@ -434,3 +434,23 @@ def admin_reset_litres(device):
         return jsonify({"error": f"Failed to reset litres: {str(e)}"}), 500
 
 
+@api_bp.route("/api/mqtt/status", methods=["GET"])
+def get_mqtt_status():
+    """
+    GET /api/mqtt/status
+    Returns MQTT broker connection diagnostic status.
+    """
+    try:
+        from .mqtt_client import get_mqtt_info
+    except ImportError:
+        try:
+            from mqtt_client import get_mqtt_info
+        except ImportError:
+            get_mqtt_info = None
+
+    if get_mqtt_info:
+        return jsonify(get_mqtt_info()), 200
+    return jsonify({"error": "MQTT module unavailable"}), 503
+
+
+

@@ -328,16 +328,17 @@ def start_mqtt() -> None:
         # Initialize DB pool first
         _get_db_pool()
 
-        host = os.getenv("MQTT_HOST") or os.getenv("MQTT_BROKER", "localhost")
+        host = os.getenv("MQTT_HOST") or os.getenv("MQTT_BROKER", "e0615ec6.ala.asia-southeast1.emqxsl.com")
         port = int(os.getenv("MQTT_PORT", "8883"))
         username = os.getenv("MQTT_BACKEND_USERNAME") or os.getenv("MQTT_USERNAME", "").strip()
         password = os.getenv("MQTT_BACKEND_PASSWORD") or os.getenv("MQTT_PASSWORD", "").strip()
         use_tls = os.getenv("MQTT_USE_TLS", "true").lower() in ("true", "1", "yes")
         ca_cert = os.getenv("MQTT_CA_CERT", "").strip()
 
+        client_id = f"backend-ingest-{int(time.time()) % 10000}"
         client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-            client_id="backend-ingest",
+            client_id=client_id,
             protocol=mqtt.MQTTv311
         )
 
@@ -358,7 +359,7 @@ def start_mqtt() -> None:
         # Automatic reconnect with exponential backoff (1s to 30s)
         client.reconnect_delay_set(min_delay=1, max_delay=30)
 
-        logger.info(f"Connecting to MQTT broker at {host}:{port} as 'backend-ingest'...")
+        logger.info(f"Connecting to MQTT broker at {host}:{port} as '{client_id}'...")
         try:
             client.connect(host, port, keepalive=60)
             client.loop_start()
@@ -493,16 +494,22 @@ def get_last_flow_lpm(device: str) -> Optional[float]:
         return _last_flows.get(device, None)
 
 
-def register_reading_handler(fn: Callable[[str, float, float, float], None]) -> None:
+def get_mqtt_info() -> dict:
     """
-    Registers a callback hook invoked immediately AFTER a telemetry reading is saved to PostgreSQL.
-
-    Signature: fn(device_name: str, litres: float, total_l: float, flow_lpm: float) -> None
+    Returns connection and diagnostics metadata for the MQTT background service.
     """
-    with _state_lock:
-        if fn not in _reading_handlers:
-            _reading_handlers.append(fn)
-            logger.info(f"Registered reading handler: {fn.__name__ if hasattr(fn, '__name__') else fn}")
+    client = _mqtt_client
+    is_conn = client.is_connected() if (client and hasattr(client, "is_connected")) else False
+    host = os.getenv("MQTT_HOST") or os.getenv("MQTT_BROKER", "e0615ec6.ala.asia-southeast1.emqxsl.com")
+    username = os.getenv("MQTT_BACKEND_USERNAME") or os.getenv("MQTT_USERNAME", "").strip()
+    return {
+        "is_started": _is_started,
+        "is_connected": is_conn,
+        "broker_host": host,
+        "broker_port": int(os.getenv("MQTT_PORT", "8883")),
+        "configured_user": username if username else "(empty)",
+        "tracked_devices": list(_relay_states.keys()),
+    }
 
 
 # ==============================================================================
