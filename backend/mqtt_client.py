@@ -195,12 +195,19 @@ def _insert_reading_to_db(device_pk: int, litres: float, total_l: float) -> bool
     return bool(res)
 
 
+_last_rc = "Connecting..."
+_last_error = None
+
+
 # ==============================================================================
 # MQTT Callbacks & Ingestion Logic
 # ==============================================================================
 def _on_connect(client, userdata, flags, reason_code, properties=None):
+    global _last_rc, _last_error
     rc_val = getattr(reason_code, "value", reason_code)
+    _last_rc = str(reason_code)
     if rc_val == 0 or getattr(reason_code, "is_failure", False) is False:
+        _last_error = None
         logger.info("Connected successfully to EMQX Broker.")
 
         # Subscribe with QoS 1 on every connect & reconnect
@@ -210,6 +217,7 @@ def _on_connect(client, userdata, flags, reason_code, properties=None):
         client.subscribe(status_topic, qos=1)
         logger.info(f"Subscribed (QoS 1) to telemetry topics: '{usage_topic}' and '{status_topic}'")
     else:
+        _last_error = f"Broker rejected connection: {reason_code} (rc={rc_val})"
         logger.error(f"Connection rejected by broker: rc={rc_val} ({reason_code})")
 
 
@@ -508,6 +516,8 @@ def get_mqtt_info() -> dict:
         "broker_host": host,
         "broker_port": int(os.getenv("MQTT_PORT", "8883")),
         "configured_user": username if username else "(empty)",
+        "last_connection_result": _last_rc,
+        "last_error": _last_error,
         "tracked_devices": list(_relay_states.keys()),
     }
 
