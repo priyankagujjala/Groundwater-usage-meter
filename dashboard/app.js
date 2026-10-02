@@ -1047,8 +1047,10 @@
       state.readingsHistory = readings;
       ChartEngine.update(readings);
 
-      // If online and no unpaid bills and not over limit, clear danger alert
+      // Auto-clear connection warning banner on successful fetch if no breach or unpaid bills
       if (!hasUnpaidBills && !state.mockNetworkFail && usage.total < usage.limit) {
+        UI.hideAlert();
+      } else if (UI.elements.alertBanner && UI.elements.alertBanner.classList.contains('alert-warning')) {
         UI.hideAlert();
       }
 
