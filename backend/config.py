@@ -30,10 +30,10 @@ class Config:
     MQTT_USERNAME = os.getenv("MQTT_USERNAME") or ""
     MQTT_PASSWORD = os.getenv("MQTT_PASSWORD") or ""
 
-    # CORS Settings
+    # CORS Settings (Permit GitHub Pages, Netlify, and local development)
     raw_origins = os.getenv(
         "ALLOWED_ORIGINS",
-        "http://localhost:8000,http://localhost:8080,http://localhost:3000,http://127.0.0.1:8000,http://127.0.0.1:8080,https://*.netlify.app"
+        "*"
     )
     ALLOWED_ORIGINS = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
 

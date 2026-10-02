@@ -28,9 +28,8 @@ def create_app(config_class=Config):
     # Initialize Database
     db.init_app(app)
 
-    # Configure CORS for Allowed Origins (including Netlify and local dashboard)
-    allowed_origins = app.config.get("ALLOWED_ORIGINS", ["*"])
-    CORS(app, resources={r"/api/*": {"origins": allowed_origins}, r"/health": {"origins": "*"}})
+    # Configure CORS for Allowed Origins (including GitHub Pages, Netlify, and local dashboard)
+    CORS(app, resources={r"/api/*": {"origins": "*"}, r"/health": {"origins": "*"}})
 
     # Register API Blueprint
     app.register_blueprint(api_bp)
