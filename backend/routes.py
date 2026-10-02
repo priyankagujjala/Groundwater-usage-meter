@@ -5,10 +5,10 @@ import razorpay
 
 try:
     from .models import db, Device, Reading, Bill
-    from .billing import get_device_state, set_device_relay, is_device_online, check_and_enforce_billing
+    from .billing import get_device_state, set_device_relay, is_device_online, check_and_enforce_billing, reset_device_month
 except ImportError:
     from models import db, Device, Reading, Bill
-    from billing import get_device_state, set_device_relay, is_device_online, check_and_enforce_billing
+    from billing import get_device_state, set_device_relay, is_device_online, check_and_enforce_billing, reset_device_month
 
 logger = logging.getLogger("routes")
 api_bp = Blueprint("api", __name__)
@@ -414,3 +414,21 @@ def update_device_quota(device):
         "monthly_limit_l": round(device_obj.monthly_limit_l, 2),
         "rate_per_l": round(device_obj.rate_per_l, 4),
     }), 200
+
+
+@api_bp.route("/api/device/<device>/reset-month", methods=["POST"])
+def admin_reset_month(device):
+    """
+    POST /api/device/<device>/reset-month
+    Admin endpoint to reset current monthly billing cycle:
+    1. Sets usage to 0.0 Litres.
+    2. Opens relay valve and sends MQTT reset signal to ESP32.
+    3. Resets gauge to 0 and green.
+    """
+    try:
+        result = reset_device_month(device)
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Failed to reset monthly cycle for '{device}': {e}", exc_info=True)
+        return jsonify({"error": f"Failed to reset month: {str(e)}"}), 500
+

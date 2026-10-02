@@ -357,3 +357,25 @@ def test_auth_login_endpoints(client):
     # Empty username rejected
     res_bad = client.post("/api/auth/login", json={"username": ""})
     assert res_bad.status_code == 401
+
+
+def test_admin_reset_month(client, app):
+    """POST /api/device/<device>/reset-month resets usage to 0.0 and turns relay ON."""
+    with app.app_context():
+        device = Device.query.filter_by(name="device1").first()
+        r = Reading(device_id=device.id, litres=50.0, total_l=550.0)
+        db.session.add(r)
+        db.session.commit()
+
+    res = client.post("/api/device/device1/reset-month")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["success"] is True
+    assert data["total"] == 0.0
+    assert data["relay"] == "ON"
+
+    # Verify subsequent GET /api/usage reflects 0.0
+    usage_res = client.get("/api/usage/device1")
+    assert usage_res.status_code == 200
+    assert usage_res.get_json()["total"] == 0.0
+

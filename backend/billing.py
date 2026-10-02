@@ -259,3 +259,47 @@ def check_and_enforce_billing(device_obj):
             dev_state["flow_lpm"] = 0.0
             return new_bill
     return None
+
+
+def reset_device_month(device_name: str) -> dict:
+    """
+    Resets the monthly usage cycle for a device:
+    1. Records a 0.0L reading to reset the cycle usage counter to 0.
+    2. Restores in-memory relay state to 'ON' and clears flow rate.
+    3. Dispatches MQTT command with reset: true so ESP32 local counter resets and valve opens.
+    """
+    device = Device.query.filter_by(name=device_name).first()
+    if not device:
+        device = Device(name=device_name, monthly_limit_l=500.0, rate_per_l=0.10)
+        db.session.add(device)
+
+    # Insert fresh 0.0L cycle start reading
+    reset_reading = Reading(
+        device_id=device.id,
+        litres=0.0,
+        total_l=0.0,
+        ts=datetime.now(timezone.utc)
+    )
+    db.session.add(reset_reading)
+    db.session.commit()
+
+    # Reset in-memory device state
+    dev_state = get_device_state(device_name)
+    dev_state["relay"] = "ON"
+    dev_state["flow_lpm"] = 0.0
+
+    # Publish MQTT reset command (relay: ON, reset: true)
+    try:
+        publish_relay(device_name, "ON", wait_for_ack=True, reset_cycle=True)
+    except TypeError:
+        publish_relay(device_name, "ON", wait_for_ack=True)
+
+    logger.info(f"[MONTH RESET] Device '{device_name}' monthly cycle reset to 0.0L. Relay turned ON.")
+    return {
+        "success": True,
+        "device": device_name,
+        "total": 0.0,
+        "relay": "ON",
+        "message": f"Monthly cycle for '{device_name}' has been successfully reset to 0.0 L."
+    }
+

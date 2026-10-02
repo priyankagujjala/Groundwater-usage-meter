@@ -92,7 +92,12 @@
       <!-- 1. Quota & Usage Gauge -->
       <section class="card col-gauge" id="card-gauge" aria-label="Water Usage Gauge">
         <div class="card-header">
-          <h2 class="card-title"><i class="fa-solid fa-gauge-high"></i> Monthly Quota</h2>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h2 class="card-title"><i class="fa-solid fa-gauge-high"></i> Monthly Quota</h2>
+            <span class="badge badge-month" id="gauge-month-badge" title="Active Billing Month">
+              <i class="fa-solid fa-calendar-days"></i> <span id="current-month-name">Current Month</span>
+            </span>
+          </div>
           <span class="usage-percent-badge" id="gauge-percent-badge">0%</span>
         </div>
 
@@ -106,13 +111,16 @@
           <div class="gauge-center-content">
             <span class="gauge-used-val" id="gauge-used-litres">0.0</span>
             <span class="gauge-unit">Litres Used</span>
-            <span class="gauge-limit-subtext">Limit: <strong id="gauge-limit-litres">500</strong> L</span>
+            <span class="gauge-limit-subtext">Monthly Limit: <strong id="gauge-limit-litres">500</strong> L</span>
           </div>
         </div>
 
         <div class="gauge-footer">
           <span style="font-size: 0.8rem; color: var(--text-muted);" id="gauge-status-desc">
             Consumption within standard allowance
+          </span>
+          <span id="month-days-left-text" style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+            <i class="fa-regular fa-clock"></i> <span id="days-remaining-val">--</span> days remaining in this month
           </span>
         </div>
       </section>
@@ -192,12 +200,17 @@
 
       <!-- 5. Tariff & Quota Summary Info -->
       <section class="card col-info" aria-label="Tariff and Limits">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
           <h2 class="card-title"><i class="fa-solid fa-receipt"></i> Policy & Billing</h2>
-          <!-- Admin Edit Limits Button -->
-          <button class="btn-pill" id="btn-open-quota-modal" style="display: inline-flex;" title="Edit Quota & Tariff">
-            <i class="fa-solid fa-sliders"></i> Edit Limits
-          </button>
+          <!-- Admin Actions: Reset Month & Edit Limits -->
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button class="btn-pill btn-admin-reset-month" id="btn-open-reset-month-modal" style="display: inline-flex;" title="Reset Month Quota Cycle (Admin)">
+              <i class="fa-solid fa-arrows-rotate"></i> Reset Month
+            </button>
+            <button class="btn-pill" id="btn-open-quota-modal" style="display: inline-flex;" title="Edit Quota & Tariff">
+              <i class="fa-solid fa-sliders"></i> Edit Limits
+            </button>
+          </div>
         </div>
 
         <div class="info-list">
@@ -384,6 +397,37 @@
           <button type="submit" class="btn-primary" id="btn-save-quota"><i class="fa-solid fa-check"></i> Save Policy</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       Admin Reset Month Cycle Confirmation Modal
+       ========================================================================= -->
+  <div class="modal-overlay" id="reset-month-modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title"><i class="fa-solid fa-arrows-rotate"></i> Reset Monthly Quota Cycle</h3>
+        <button class="btn-icon" id="btn-close-reset-modal" type="button"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body" style="padding: 16px 0;">
+        <p style="color: var(--text-primary); margin-bottom: 12px; font-size: 0.95rem;">
+          Are you sure you want to <strong>reset the monthly cycle</strong> for <strong id="reset-modal-device-id" style="color: var(--accent-cyan);">device1</strong>?
+        </p>
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid var(--success-border); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px;">
+          <ul style="color: var(--text-secondary); font-size: 0.85rem; padding-left: 18px; line-height: 1.6;">
+            <li>Current month's usage resets to <strong>0.0 Litres (0%)</strong>.</li>
+            <li>The Gauge resets to 0 and turns <strong>Green</strong>.</li>
+            <li>The motor valve is automatically commanded <strong>OPEN (ON)</strong>.</li>
+            <li>A reset signal is sent to the ESP32 hardware via MQTT.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="btn-cancel-reset-month">Cancel</button>
+        <button type="button" class="btn-primary" id="btn-confirm-reset-month" style="background: var(--success); border-color: var(--success);">
+          <i class="fa-solid fa-rotate"></i> Confirm Reset Month
+        </button>
+      </div>
     </div>
   </div>
 

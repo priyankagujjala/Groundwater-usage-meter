@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AquaPulse — Hardware Connection & Firmware Guide</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    @page {
+      size: A4;
+      margin: 18mm 16mm 18mm 16mm;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #0f172a;
+      background: #ffffff;
+      line-height: 1.5;
+      font-size: 10.5pt;
+    }
+
+    .header-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 2px solid #0284c7;
+      padding-bottom: 12px;
+      margin-bottom: 20px;
+    }
+
+    .brand-title {
+      font-size: 20pt;
+      font-weight: 800;
+      color: #0369a1;
+      letter-spacing: -0.5px;
+    }
+
+    .brand-subtitle {
+      font-size: 9.5pt;
+      color: #64748b;
+      margin-top: 2px;
+    }
+
+    .doc-badge {
+      background: #e0f2fe;
+      color: #0369a1;
+      border: 1px solid #bae6fd;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 8.5pt;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      font-size: 12.5pt;
+      font-weight: 700;
+      color: #0f172a;
+      margin-top: 18px;
+      margin-bottom: 8px;
+      border-left: 3.5px solid #0284c7;
+      padding-left: 8px;
+    }
+
+    p {
+      margin-bottom: 8px;
+      color: #334155;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 16px 0;
+      font-size: 9pt;
+    }
+
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 6px 10px;
+      text-align: left;
+    }
+
+    th {
+      background: #f1f5f9;
+      font-weight: 700;
+      color: #1e293b;
+    }
+
+    tr:nth-child(even) {
+      background: #f8fafc;
+    }
+
+    pre, code {
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .diagram-box {
+      background: #0f172a;
+      color: #38bdf8;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 8pt;
+      line-height: 1.35;
+      margin: 10px 0 14px 0;
+      white-space: pre;
+      overflow-x: hidden;
+    }
+
+    .code-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 7.5pt;
+      line-height: 1.35;
+      color: #1e293b;
+      margin: 10px 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .key-keyword { color: #8b5cf6; font-weight: 600; }
+    .key-type { color: #0284c7; font-weight: 600; }
+    .key-str { color: #16a34a; }
+    .key-comment { color: #94a3b8; font-style: italic; }
+
+    .callout {
+      background: #eff6ff;
+      border-left: 4px solid #3b82f6;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 9pt;
+      margin: 10px 0;
+    }
+
+    .page-break {
+      page-break-before: always;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header-banner">
+    <div>
+      <div class="brand-title">AquaPulse</div>
+      <div class="brand-subtitle">IoT Groundwater Metering, Quota Enforcement & Hardware Guide</div>
+    </div>
+    <div class="doc-badge">Engineering Spec</div>
+  </div>
+
+  <h2>1. Overview & Architecture</h2>
+  <p>
+    AquaPulse provides real-time groundwater monitoring and automated pay-on-excess enforcement. The physical hardware consists of an <strong>ESP32 microcontroller</strong> connected to a <strong>YF-S201 flow sensor</strong> and a <strong>motor relay valve</strong>. Telemetry is transmitted to an EMQX Cloud MQTT broker, processed by a Flask backend on Render, stored in PostgreSQL, and displayed live on Netlify (<strong>aguapulse.netlify.app</strong>).
+  </p>
+
+  <div class="callout">
+    <strong>Zero Backend Change Required:</strong> The cloud backend and dashboard already adhere to the exact MQTT contract shown below. Flashing the ESP32 with this firmware seamlessly integrates live telemetry without modifying server code.
+  </div>
+
+  <h2>2. Hardware Bill of Materials (BOM)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Component</th>
+        <th>Specification</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Microcontroller</strong></td>
+        <td>ESP32 NodeMCU / DevKit V1 (ESP-WROOM-32)</td>
+        <td>Handles Wi-Fi, TLS MQTT telemetry, interrupt counting & relay trigger</td>
+      </tr>
+      <tr>
+        <td><strong>Flow Sensor</strong></td>
+        <td>YF-S201 (Hall-effect, 1/2" inline pipe)</td>
+        <td>Measures water pulse interrupts and velocity (L/min)</td>
+      </tr>
+      <tr>
+        <td><strong>Relay Module</strong></td>
+        <td>5V 1-Channel Relay (Optocoupler Isolated)</td>
+        <td>Electromechanically opens/shuts motor power circuit</td>
+      </tr>
+      <tr>
+        <td><strong>Water Pump / Motor</strong></td>
+        <td>12V DC Submersible Pump or Solenoid Valve</td>
+        <td>Simulates groundwater extraction well pump</td>
+      </tr>
+      <tr>
+        <td><strong>Power Supply</strong></td>
+        <td>12V DC Adapter + 5V Micro-USB Cable</td>
+        <td>Supplies power to pump and logic power to ESP32</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>3. Circuit Schematic & Pin Mapping</h2>
+  <div class="diagram-box">
+  +-------------------------------------------------------------+
+  |                        ESP32 DevKit                         |
+  |                                                             |
+  |   [ GPIO 18 ] &lt;-------- Yellow (Signal) --- [ Flow Sensor ] |
+  |   [ 5V / VIN] --------&gt; Red    (VCC)        | (YF-S201)     |
+  |   [ GND     ] --------&gt; Black  (GND)        +---------------+
+  |                                                             |
+  |   [ GPIO 23 ] --------&gt; IN (Signal) ------- [ 5V Relay ]    |
+  |   [ 5V / VIN] --------&gt; VCC                 | Module        |
+  |   [ GND     ] --------&gt; GND                 +-------+-------+
+  +-----------------------------------------------------+-------+
+                                                        | COM &amp; NO
+                                              [ 12V Motor / Pump ]
+                                                        |
+                                                [ 12V Power Supply ]</div>
+
+  <h2>4. MQTT Cloud Communication Contract</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Topic</th>
+        <th>Direction</th>
+        <th>Payload Example</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>gw/device1/usage</code></td>
+        <td>ESP32 ➔ Cloud</td>
+        <td><code>{"device":"device1","flow_lpm":2.4,"litres":0.2,"total":132.5}</code></td>
+        <td>Published every 5s interval</td>
+      </tr>
+      <tr>
+        <td><code>gw/device1/cmd</code></td>
+        <td>Cloud ➔ ESP32</td>
+        <td><code>{"relay":"ON"}</code> or <code>{"relay":"OFF"}</code></td>
+        <td>Actuates motor valve cutoff / restore</td>
+      </tr>
+      <tr>
+        <td><code>gw/device1/status</code></td>
+        <td>ESP32 ➔ Cloud</td>
+        <td><code>online</code> / <code>offline</code></td>
+        <td>MQTT Last Will & Testament</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="page-break"></div>
+
+  <h2>5. ESP32 Arduino Firmware (AquaPulse_ESP32.ino)</h2>
+  <div class="code-box">
+<span class="key-keyword">#include</span> &lt;WiFi.h&gt;
+<span class="key-keyword">#include</span> &lt;WiFiClientSecure.h&gt;
+<span class="key-keyword">#include</span> &lt;PubSubClient.h&gt;
+<span class="key-keyword">#include</span> &lt;ArduinoJson.h&gt;
+
+<span class="key-comment">// ================= USER CONFIGURATION =================</span>
+<span class="key-type">const char*</span> WIFI_SSID     = <span class="key-str">"YOUR_WIFI_NAME"</span>;
+<span class="key-type">const char*</span> WIFI_PASSWORD = <span class="key-str">"YOUR_WIFI_PASSWORD"</span>;
+
+<span class="key-comment">// EMQX Cloud Serverless TLS Broker Details (from backend .env)</span>
+<span class="key-type">const char*</span> MQTT_BROKER   = <span class="key-str">"your-emqx-host.emqxsl.cn"</span>;
+<span class="key-type">const int</span>   MQTT_PORT     = 8883;
+<span class="key-type">const char*</span> MQTT_USER     = <span class="key-str">"your_mqtt_username"</span>;
+<span class="key-type">const char*</span> MQTT_PASS     = <span class="key-str">"your_mqtt_password"</span>;
+<span class="key-type">const char*</span> DEVICE_ID     = <span class="key-str">"device1"</span>;
+
+<span class="key-keyword">#define</span> FLOW_SENSOR_PIN   18
+<span class="key-keyword">#define</span> RELAY_PIN         23
+<span class="key-type">const float</span> CALIBRATION_FACTOR = 7.5; <span class="key-comment">// 7.5 pulses/sec = 1 L/min</span>
+
+<span class="key-comment">// ================= RUNTIME VARIABLES ==================</span>
+<span class="key-type">volatile int</span> pulseCount = 0;
+<span class="key-type">float</span> totalLitres = 0.0;
+<span class="key-type">unsigned long</span> lastPublishTime = 0;
+<span class="key-type">bool</span> relayState = <span class="key-keyword">true</span>;
+
+WiFiClientSecure tlsClient;
+PubSubClient mqttClient(tlsClient);
+
+<span class="key-type">void</span> IRAM_ATTR pulseCounter() { pulseCount++; }
+
+<span class="key-type">void</span> callback(<span class="key-type">char*</span> topic, <span class="key-type">byte*</span> payload, <span class="key-type">unsigned int</span> length) {
+  String msg = <span class="key-str">""</span>;
+  <span class="key-keyword">for</span> (<span class="key-type">int</span> i = 0; i &lt; length; i++) msg += (<span class="key-type">char</span>)payload[i];
+  Serial.println(<span class="key-str">"[MQTT Command]: "</span> + msg);
+
+  StaticJsonDocument&lt;200&gt; doc;
+  <span class="key-keyword">if</span> (!deserializeJson(doc, msg) &amp;&amp; doc.containsKey(<span class="key-str">"relay"</span>)) {
+    <span class="key-type">const char*</span> cmd = doc[<span class="key-str">"relay"</span>];
+    <span class="key-keyword">if</span> (String(cmd) == <span class="key-str">"ON"</span>) {
+      relayState = <span class="key-keyword">true</span>;
+      digitalWrite(RELAY_PIN, HIGH);
+    } <span class="key-keyword">else if</span> (String(cmd) == <span class="key-str">"OFF"</span>) {
+      relayState = <span class="key-keyword">false</span>;
+      digitalWrite(RELAY_PIN, LOW);
+    }
+  }
+}
+
+<span class="key-type">void</span> connectMQTT() {
+  <span class="key-keyword">while</span> (!mqttClient.connected()) {
+    String clientId = <span class="key-str">"ESP32-"</span> + String(DEVICE_ID);
+    String statusTopic = <span class="key-str">"gw/"</span> + String(DEVICE_ID) + <span class="key-str">"/status"</span>;
+    <span class="key-keyword">if</span> (mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASS, statusTopic.c_str(), 1, <span class="key-keyword">true</span>, <span class="key-str">"offline"</span>)) {
+      mqttClient.publish(statusTopic.c_str(), <span class="key-str">"online"</span>, <span class="key-keyword">true</span>);
+      mqttClient.subscribe((<span class="key-str">"gw/"</span> + String(DEVICE_ID) + <span class="key-str">"/cmd"</span>).c_str());
+    } <span class="key-keyword">else</span> { delay(3000); }
+  }
+}
+
+<span class="key-type">void</span> setup() {
+  Serial.begin(115200);
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, HIGH);
+  pinMode(FLOW_SENSOR_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  <span class="key-keyword">while</span> (WiFi.status() != WL_CONNECTED) { delay(500); }
+
+  tlsClient.setInsecure();
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttClient.setCallback(callback);
+}
+
+<span class="key-type">void</span> loop() {
+  <span class="key-keyword">if</span> (!mqttClient.connected()) connectMQTT();
+  mqttClient.loop();
+
+  <span class="key-type">unsigned long</span> now = millis();
+  <span class="key-keyword">if</span> (now - lastPublishTime &gt;= 5000) {
+    detachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN));
+    <span class="key-type">float</span> flowRateLpm = ((1000.0 / (now - lastPublishTime)) * pulseCount) / CALIBRATION_FACTOR;
+    <span class="key-type">float</span> deltaLitres = (flowRateLpm / 60.0) * ((now - lastPublishTime) / 1000.0);
+    totalLitres += deltaLitres;
+    pulseCount = 0;
+    lastPublishTime = now;
+    attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
+
+    StaticJsonDocument&lt;256&gt; doc;
+    doc[<span class="key-str">"device"</span>]   = DEVICE_ID;
+    doc[<span class="key-str">"flow_lpm"</span>] = serialized(String(flowRateLpm, 2));
+    doc[<span class="key-str">"litres"</span>]   = serialized(String(deltaLitres, 2));
+    doc[<span class="key-str">"total"</span>]    = serialized(String(totalLitres, 2));
+    <span class="key-type">char</span> buf[256];
+    serializeJson(doc, buf);
+    mqttClient.publish((<span class="key-str">"gw/"</span> + String(DEVICE_ID) + <span class="key-str">"/usage"</span>).c_str(), buf);
+  }
+}
+  </div>
+
+  <h2>6. End-to-End Operational Lifecycle</h2>
+  <ol style="margin-left: 20px; font-size: 9.5pt; line-height: 1.6;">
+    <li><strong>Physical Pumping:</strong> Water flow spins the sensor turbine, firing interrupts on ESP32 GPIO 18.</li>
+    <li><strong>Telemetry Cycle:</strong> Every 5 seconds, volume and flow velocity are published via TLS to EMQX.</li>
+    <li><strong>Live Telemetry:</strong> Flask updates PostgreSQL and the Netlify UI updates gauges in real time.</li>
+    <li><strong>Threshold Breach & Cutoff:</strong> If usage exceeds the quota limit (e.g. 500L), Flask sends <code>{"relay":"OFF"}</code>. ESP32 trips the relay, instantly halting water extraction.</li>
+    <li><strong>Payment & Restoration:</strong> The consumer settles the bill via Razorpay on the dashboard. Upon signature verification, Flask sends <code>{"relay":"ON"}</code>, re-energizing the pump.</li>
+  </ol>
+
+</body>
+</html>

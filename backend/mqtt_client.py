@@ -408,7 +408,7 @@ def stop_mqtt() -> None:
         logger.info("MQTT ingestion shutdown complete.")
 
 
-def publish_relay(device: str, state: str, wait_for_ack: bool = False) -> bool:
+def publish_relay(device: str, state: str, wait_for_ack: bool = False, reset_cycle: bool = False) -> bool:
     """
     Publishes a relay control command to gw/<device>/cmd with QoS 1 and retain=True.
     Updates the in-memory relay state.
@@ -418,6 +418,7 @@ def publish_relay(device: str, state: str, wait_for_ack: bool = False) -> bool:
         state (str): Desired state ('ON' or 'OFF')
         wait_for_ack (bool): If True, wait up to 3.0s for broker publish acknowledgement.
                             Default False (must be False when called from network thread).
+        reset_cycle (bool): If True, informs ESP32 hardware to reset local cycle litre counter.
 
     Returns:
         bool: True if publish was accepted (or acknowledged if wait_for_ack=True), False otherwise. Never raises.
@@ -440,7 +441,10 @@ def publish_relay(device: str, state: str, wait_for_ack: bool = False) -> bool:
         logger.info(f"[RELAY CMD] Client connected: {is_conn}")
 
         topic = f"gw/{device}/cmd"
-        payload = json.dumps({"relay": norm_state})
+        cmd_payload = {"relay": norm_state}
+        if reset_cycle:
+            cmd_payload["reset"] = True
+        payload = json.dumps(cmd_payload)
 
         # retain=True ensures newly connecting / recovering simulators immediately adopt the commanded state
         msg_info = client.publish(topic, payload=payload, qos=1, retain=True)

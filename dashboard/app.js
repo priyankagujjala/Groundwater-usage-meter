@@ -192,6 +192,20 @@
         payment_id: bill ? bill.payment_id : 'pay_mock',
         relay: 'ON'
       };
+    },
+
+    resetMonth() {
+      state.totalUsageLitres = 0.0;
+      state.relayState = 'ON';
+      state.flowRateLpm = 2.4;
+      state.bills = [];
+      this.init();
+      return {
+        success: true,
+        total: 0.0,
+        relay: 'ON',
+        message: 'Monthly cycle reset successfully.'
+      };
     }
   };
 
@@ -308,6 +322,19 @@
       return await this.request(`/api/device/${encodeURIComponent(deviceId)}/quota`, {
         method: 'POST',
         body: JSON.stringify({ monthly_limit_l: Number(limit), rate_per_l: Number(rate) }),
+      });
+    },
+
+    /**
+     * POST /api/device/<device>/reset-month
+     * Admin method to reset monthly quota cycle to 0.0 Litres and turn valve ON
+     */
+    async resetMonth(deviceId) {
+      if (config.USE_MOCK) {
+        return MockEngine.resetMonth();
+      }
+      return await this.request(`/api/device/${encodeURIComponent(deviceId)}/reset-month`, {
+        method: 'POST',
       });
     },
 
@@ -513,6 +540,20 @@
     }
   };
 
+  /**
+   * Helper function to calculate current billing month name and days remaining
+   */
+  function getCurrentMonthInfo() {
+    const now = new Date();
+    const monthName = now.toLocaleString('default', { month: 'long', year: 'numeric' });
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const daysRemaining = Math.max(0, lastDayOfMonth - now.getDate());
+    const monthKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+    return { monthName, daysRemaining, monthKey, lastDayOfMonth };
+  }
+
   /* ==========================================================================
      5. UI Renderers
      ========================================================================== */
@@ -524,6 +565,8 @@
       gaugePercentBadge: document.getElementById('gauge-percent-badge'),
       gaugeCard: document.getElementById('card-gauge'),
       gaugeDesc: document.getElementById('gauge-status-desc'),
+      currentMonthName: document.getElementById('current-month-name'),
+      daysRemainingVal: document.getElementById('days-remaining-val'),
 
       liveFlowText: document.getElementById('live-flow-rate'),
       flowHourlyText: document.getElementById('flow-hourly'),
@@ -586,6 +629,14 @@
       inputQuotaDevice: document.getElementById('input-quota-device'),
       inputQuotaLimit: document.getElementById('input-quota-limit'),
       inputQuotaRate: document.getElementById('input-quota-rate'),
+
+      // Admin Month Reset Modal
+      btnOpenResetMonthModal: document.getElementById('btn-open-reset-month-modal'),
+      resetMonthModalOverlay: document.getElementById('reset-month-modal-overlay'),
+      btnCloseResetModal: document.getElementById('btn-close-reset-modal'),
+      btnCancelResetMonth: document.getElementById('btn-cancel-reset-month'),
+      btnConfirmResetMonth: document.getElementById('btn-confirm-reset-month'),
+      resetModalDeviceId: document.getElementById('reset-modal-device-id'),
     },
 
     renderRole() {
@@ -599,6 +650,7 @@
         }
         if (this.elements.currentRoleIcon) this.elements.currentRoleIcon.className = 'fa-solid fa-user-shield';
         if (this.elements.currentRoleText) this.elements.currentRoleText.textContent = 'Admin';
+        if (this.elements.btnOpenResetMonthModal) this.elements.btnOpenResetMonthModal.style.display = 'inline-flex';
         if (this.elements.btnOpenQuotaModal) this.elements.btnOpenQuotaModal.style.display = 'inline-flex';
         if (this.elements.cardPayActionContainer) this.elements.cardPayActionContainer.style.display = 'none';
         if (this.elements.billsCardTitle) {
@@ -614,6 +666,7 @@
         }
         if (this.elements.currentRoleIcon) this.elements.currentRoleIcon.className = 'fa-solid fa-user';
         if (this.elements.currentRoleText) this.elements.currentRoleText.textContent = username;
+        if (this.elements.btnOpenResetMonthModal) this.elements.btnOpenResetMonthModal.style.display = 'none';
         if (this.elements.btnOpenQuotaModal) this.elements.btnOpenQuotaModal.style.display = 'none';
         if (this.elements.billsCardTitle) {
           this.elements.billsCardTitle.innerHTML = '<i class="fa-solid fa-file-invoice-dollar"></i> My Excess Invoices';
@@ -631,6 +684,11 @@
       const percent = Math.min(Math.round((used / limit) * 100), 100);
       const isOverLimit = used >= limit;
       const isUser = (state.currentUser.role || 'user') === 'user';
+      const monthInfo = getCurrentMonthInfo();
+
+      // Update Month Header and Days Remaining
+      if (this.elements.currentMonthName) this.elements.currentMonthName.textContent = monthInfo.monthName;
+      if (this.elements.daysRemainingVal) this.elements.daysRemainingVal.textContent = monthInfo.daysRemaining;
 
       // Update Gauge Number & Texts
       this.elements.gaugeUsedText.textContent = used;
@@ -667,25 +725,23 @@
         }
       }
 
-      // Gauge warning, danger, and paid excess states
+      // Requirement 2: If user has crossed the limit in that month, gauge is SOLID RED till the month is over
+      // Requirement 3: Gauge resets to 0 and turns GREEN when new month starts
       if (isOverLimit) {
         this.elements.gaugeCard.classList.add('gauge-danger');
         this.elements.gaugeCircle.style.stroke = 'var(--gauge-danger)';
-        const hasUnpaid = hasUnpaidBills || (state.bills && state.bills.some(b => (b.status || '').toLowerCase() === 'unpaid'));
-        if (hasUnpaid) {
-          this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--danger);"><i class="fa-solid fa-triangle-exclamation"></i> Limit Breached (+${excess.toFixed(1)} L) — Bill Unpaid</strong>`;
-          this.showAlert(`Monthly limit of ${limit}L exceeded! Motor valve shut off. Pay excess bill to restore flow.`, 'danger');
-        } else {
-          this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--danger);"><i class="fa-solid fa-triangle-exclamation"></i> Limit Breached (+${excess.toFixed(1)} L) — Exceeds Quota</strong>`;
-        }
-      } else if (percent >= 80) {
-        this.elements.gaugeCard.classList.remove('gauge-danger');
-        this.elements.gaugeCircle.style.stroke = 'var(--gauge-warn)';
-        this.elements.gaugeDesc.textContent = 'Approaching monthly allowance threshold';
+        this.elements.gaugePercentBadge.style.background = 'var(--danger-bg)';
+        this.elements.gaugePercentBadge.style.color = 'var(--danger)';
+        this.elements.gaugePercentBadge.style.borderColor = 'var(--danger-border)';
+        this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--danger);"><i class="fa-solid fa-triangle-exclamation"></i> Limit Breached (+${excess.toFixed(1)} L) — Locked RED for ${monthInfo.monthName}</strong>`;
+        this.showAlert(`Monthly groundwater limit of ${limit}L exceeded for ${monthInfo.monthName}! Motor valve shut off. Gauge remains RED until the month is over or Admin resets the month.`, 'danger');
       } else {
         this.elements.gaugeCard.classList.remove('gauge-danger');
         this.elements.gaugeCircle.style.stroke = 'var(--gauge-safe)';
-        this.elements.gaugeDesc.textContent = 'Consumption within standard allowance';
+        this.elements.gaugePercentBadge.style.background = 'var(--success-bg)';
+        this.elements.gaugePercentBadge.style.color = 'var(--success)';
+        this.elements.gaugePercentBadge.style.borderColor = 'var(--success-border)';
+        this.elements.gaugeDesc.innerHTML = `<span style="color: var(--success);"><i class="fa-solid fa-circle-check"></i> Standard Monthly Allowance (${(limit - used).toFixed(1)} L remaining in ${monthInfo.monthName})</span>`;
       }
     },
 
@@ -938,6 +994,21 @@
     UI.elements.syncSpinner.style.animation = 'spin 0.6s linear infinite';
 
     try {
+      // Check for automatic new month transition
+      const monthInfo = getCurrentMonthInfo();
+      const storedMonthKey = localStorage.getItem('aquapulse_month_key');
+      if (storedMonthKey && storedMonthKey !== monthInfo.monthKey) {
+        console.log(`[Auto Month Rollover] Detected new month (${storedMonthKey} -> ${monthInfo.monthKey}). Resetting gauge to 0L and green.`);
+        localStorage.setItem('aquapulse_month_key', monthInfo.monthKey);
+        try {
+          await ApiClient.resetMonth(state.deviceId);
+        } catch (resetErr) {
+          console.warn('Auto month reset error:', resetErr);
+        }
+      } else if (!storedMonthKey) {
+        localStorage.setItem('aquapulse_month_key', monthInfo.monthKey);
+      }
+
       // 1. Fetch current usage & device telemetry
       const rawUsage = await ApiClient.getUsage(state.deviceId);
       const usage = normalizeUsageData(rawUsage);
@@ -966,8 +1037,8 @@
       state.readingsHistory = readings;
       ChartEngine.update(readings);
 
-      // If online and no unpaid bills, clear danger alert
-      if (!hasUnpaidBills && !state.mockNetworkFail) {
+      // If online and no unpaid bills and not over limit, clear danger alert
+      if (!hasUnpaidBills && !state.mockNetworkFail && usage.total < usage.limit) {
         UI.hideAlert();
       }
 
@@ -1060,6 +1131,53 @@
           // Client-side fallback if backend unavailable
           const role = username.toLowerCase() === 'admin' ? 'admin' : 'user';
           applyLogin(role, username.charAt(0).toUpperCase() + username.slice(1));
+        }
+      });
+    }
+
+    // Admin Month Reset Modal Open
+    if (UI.elements.btnOpenResetMonthModal) {
+      UI.elements.btnOpenResetMonthModal.addEventListener('click', () => {
+        if (UI.elements.resetModalDeviceId) UI.elements.resetModalDeviceId.textContent = state.deviceId;
+        if (UI.elements.resetMonthModalOverlay) UI.elements.resetMonthModalOverlay.style.display = 'flex';
+      });
+    }
+
+    // Admin Month Reset Modal Close / Cancel
+    if (UI.elements.btnCloseResetModal) {
+      UI.elements.btnCloseResetModal.addEventListener('click', () => {
+        if (UI.elements.resetMonthModalOverlay) UI.elements.resetMonthModalOverlay.style.display = 'none';
+      });
+    }
+    if (UI.elements.btnCancelResetMonth) {
+      UI.elements.btnCancelResetMonth.addEventListener('click', () => {
+        if (UI.elements.resetMonthModalOverlay) UI.elements.resetMonthModalOverlay.style.display = 'none';
+      });
+    }
+
+    // Admin Month Reset Modal Confirm Action
+    if (UI.elements.btnConfirmResetMonth) {
+      UI.elements.btnConfirmResetMonth.addEventListener('click', async () => {
+        if (state.currentUser.role !== 'admin') {
+          UI.showAlert('Monthly reset is restricted to Administrators.', 'warning');
+          return;
+        }
+
+        UI.elements.btnConfirmResetMonth.disabled = true;
+        UI.elements.btnConfirmResetMonth.innerHTML = `<span class="spinner-sm"></span> Resetting...`;
+
+        try {
+          await ApiClient.resetMonth(state.deviceId);
+          state.totalUsageLitres = 0.0;
+          state.relayState = 'ON';
+          if (UI.elements.resetMonthModalOverlay) UI.elements.resetMonthModalOverlay.style.display = 'none';
+          UI.showAlert(`Monthly cycle for '${state.deviceId}' reset successfully! Usage reset to 0 L and gauge turned Green.`, 'success');
+          await pollData();
+        } catch (err) {
+          UI.showAlert(`Failed to reset month: ${err.message}`, 'danger');
+        } finally {
+          UI.elements.btnConfirmResetMonth.disabled = false;
+          UI.elements.btnConfirmResetMonth.innerHTML = `<i class="fa-solid fa-rotate"></i> Confirm Reset Month`;
         }
       });
     }
