@@ -186,13 +186,12 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
 
     # 4. Relay Cutoff Enforcement (Triggers when total_l hits monthly_limit_l)
     if total_l >= device.monthly_limit_l:
-        if dev_state["relay"] != "OFF":
-            publish_relay(device_name, "OFF")
-            dev_state["relay"] = "OFF"
-            dev_state["flow_lpm"] = 0.0
-            logger.warning(
-                f"[MONTHLY LIMIT BREACH] Device '{device_name}' hit monthly limit {device.monthly_limit_l}L (Total: {total_l}L). Motor relay valve turned OFF."
-            )
+        publish_relay(device_name, "OFF")
+        dev_state["relay"] = "OFF"
+        dev_state["flow_lpm"] = 0.0
+        logger.warning(
+            f"[MONTHLY LIMIT BREACH] Device '{device_name}' hit monthly limit {device.monthly_limit_l}L (Total: {total_l}L). Motor relay valve turned OFF."
+        )
         action = "MONTHLY_LIMIT_BREACHED_RELAY_OFF"
 
     db.session.commit()
@@ -257,10 +256,9 @@ def check_and_enforce_billing(device_obj):
     # 2. Relay cutoff enforcement for monthly limit
     if total_l >= device_obj.monthly_limit_l:
         dev_state = get_device_state(device_obj.name)
-        if dev_state["relay"] != "OFF":
-            publish_relay(device_obj.name, "OFF")
-            dev_state["relay"] = "OFF"
-            dev_state["flow_lpm"] = 0.0
+        publish_relay(device_obj.name, "OFF")
+        dev_state["relay"] = "OFF"
+        dev_state["flow_lpm"] = 0.0
 
     return created_bill
 

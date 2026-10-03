@@ -467,7 +467,18 @@
               state.lastMqttTelemetryTime = Date.now();
               state.totalUsageLitres = incomingTotal;
 
+              // Automatic Monthly Cutoff Enforcement (When monthly usage limit hits)
+              if (incomingTotal >= state.monthlyLimitLitres) {
+                state.relayState = 'OFF';
+                state.flowRateLpm = 0.0;
+                this.publishRelay(state.deviceId, 'OFF');
+              } else if (data.relay !== undefined || data.state !== undefined) {
+                const r = String(data.relay ?? data.state).toUpperCase();
+                state.relayState = r;
+              }
+
               UI.renderFlow(state.flowRateLpm);
+              UI.renderRelay(state.relayState);
               UI.renderUsage({
                 total: state.totalUsageLitres,
                 free_limit: state.freeLimitLitres,
@@ -478,16 +489,10 @@
                 status: 'online'
               });
 
-              if (data.relay !== undefined || data.state !== undefined) {
-                const r = String(data.relay ?? data.state).toUpperCase();
-                state.relayState = r;
-                UI.renderRelay(r);
-              }
-
               // Ingest telemetry to backend so DB readings & bills are created reliably
               ApiClient.ingestTelemetry({
                 device: state.deviceId,
-                flow_lpm: flow,
+                flow_lpm: state.flowRateLpm,
                 litres: litres,
                 total: state.totalUsageLitres
               }).then(() => {
@@ -1288,12 +1293,19 @@
       state.monthlyLimitLitres = usage.limit;
       state.ratePerLitre = usage.rate_per_l;
 
-      // Only take flow rate from HTTP poll if we haven't received recent MQTT telemetry in the last 8 seconds
-      const hasRecentMqtt = (Date.now() - (state.lastMqttTelemetryTime || 0)) < 8000;
-      if (!hasRecentMqtt) {
-        state.flowRateLpm = usage.flow_lpm;
+      // If usage reaches or exceeds monthly limit, enforce relay OFF and 0 flow
+      if (state.totalUsageLitres >= state.monthlyLimitLitres) {
+        state.relayState = 'OFF';
+        state.flowRateLpm = 0.0;
+        usage.relay = 'OFF';
+        usage.flow_lpm = 0.0;
+      } else {
+        state.relayState = usage.relay;
+        const hasRecentMqtt = (Date.now() - (state.lastMqttTelemetryTime || 0)) < 8000;
+        if (!hasRecentMqtt) {
+          state.flowRateLpm = usage.flow_lpm;
+        }
       }
-      state.relayState = usage.relay;
       state.deviceStatus = usage.status;
 
       // Keep localStorage in sync with backend truth if received
@@ -1325,7 +1337,7 @@
         status: state.deviceStatus,
       }, hasUnpaidBills);
       UI.renderFlow(state.flowRateLpm);
-      UI.renderRelay(usage.relay);
+      UI.renderRelay(state.relayState);
       UI.renderDeviceStatus(usage.status);
 
       // 4. Fetch history readings for chart
