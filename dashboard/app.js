@@ -105,29 +105,32 @@
         state.flowRateLpm = 0.0;
       }
 
-      // 1. Bill generation triggers for usage exceeding freeLimitLitres
+      // 1. Bill generation triggers for usage exceeding freeLimitLitres or hitting monthly cutoff
       if (state.totalUsageLitres > state.freeLimitLitres) {
         const excessTotal = +(state.totalUsageLitres - state.freeLimitLitres).toFixed(2);
         const previouslyBilled = state.bills.reduce((sum, b) => sum + Number(b.excess_l || 0), 0);
         const unbilledExcess = +(excessTotal - previouslyBilled).toFixed(2);
+        const isMonthlyCutoff = state.totalUsageLitres >= state.monthlyLimitLitres;
 
-        // Generate bill on crossing free limit and for every 1.0 L excess accumulated after
-        if (state.bills.length === 0 || unbilledExcess >= 1.0) {
-          const excessToBill = unbilledExcess >= 1.0 ? unbilledExcess : (excessTotal > 0 ? excessTotal : 0.1);
-          const amount = +(excessToBill * state.ratePerLitre).toFixed(2);
+        // Generate bill on first breach, monthly cutoff, or when accumulating >= 1.0 L
+        if (state.bills.length === 0 || isMonthlyCutoff || unbilledExcess >= 1.0) {
+          if (unbilledExcess > 0) {
+            const excessToBill = unbilledExcess;
+            const amount = +(excessToBill * state.ratePerLitre).toFixed(2);
 
-          state.bills.unshift({
-            id: `INV-${Date.now().toString().slice(-6)}`,
-            device_id: state.deviceId,
-            excess_l: excessToBill,
-            amount: amount > 0 ? amount : 0.05,
-            status: 'unpaid',
-            ts: new Date().toISOString(),
-          });
+            state.bills.unshift({
+              id: `INV-${Date.now().toString().slice(-6)}`,
+              device_id: state.deviceId,
+              excess_l: excessToBill,
+              amount: amount > 0 ? amount : 0.05,
+              status: 'unpaid',
+              ts: new Date().toISOString(),
+            });
+          }
         }
       }
 
-      // 2. Automatic valve cutoff triggers ONLY when monthlyLimitLitres is hit
+      // 2. Automatic valve cutoff triggers when monthlyLimitLitres is hit
       if (state.totalUsageLitres >= state.monthlyLimitLitres) {
         state.relayState = 'OFF';
         state.flowRateLpm = 0.0;

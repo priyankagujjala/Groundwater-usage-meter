@@ -143,18 +143,24 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
         should_create_bill = False
         excess_l_to_bill = 0.0
 
+        is_monthly_cutoff = total_l >= device.monthly_limit_l
+
         if len(all_bills) == 0:
             # First breach of free tier
             should_create_bill = True
             excess_l_to_bill = round(unbilled_excess_l, 2)
             if excess_l_to_bill <= 0.0:
                 excess_l_to_bill = round(float(litres) if litres > 0 else 0.1, 2)
+        elif is_monthly_cutoff and unbilled_excess_l > 0:
+            # Monthly cutoff reached: bill all remaining unbilled excess immediately
+            should_create_bill = True
+            excess_l_to_bill = round(unbilled_excess_l, 2)
         elif unbilled_excess_l >= MIN_REBILL_L:
             # Accumulated unbilled litres after prior bills
             should_create_bill = True
             excess_l_to_bill = round(unbilled_excess_l, 2)
 
-        if should_create_bill:
+        if should_create_bill and excess_l_to_bill > 0:
             amount = round(excess_l_to_bill * device.rate_per_l, 2)
             if amount <= 0.0:
                 amount = 0.01
@@ -169,11 +175,11 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
             db.session.add(new_bill)
             db.session.flush() # assign new_bill.id
 
-            action = "FREE_LIMIT_EXCEEDED_BILL_CREATED"
+            action = "MONTHLY_LIMIT_EXCEEDED_BILL_CREATED" if is_monthly_cutoff else "FREE_LIMIT_EXCEEDED_BILL_CREATED"
             bill_created = new_bill.to_dict()
             logger.warning(
-                f"[FREE LIMIT EXCEEDED] Device '{device_name}' exceeded free tier ({device.free_limit_l}L) with unbilled excess {excess_l_to_bill:.2f}L (Total: {total_l}L). "
-                f"Generated Bill #{new_bill.id} for ₹{amount:.2f}."
+                f"[BILL GENERATED] Device '{device_name}' (Total: {total_l:.2f}L, Free: {device.free_limit_l:.2f}L, Cutoff: {device.monthly_limit_l:.2f}L). "
+                f"Generated Bill #{new_bill.id} for {excess_l_to_bill:.2f}L excess = ₹{amount:.2f}."
             )
         else:
             action = "PAID_TIER_USAGE"
@@ -207,7 +213,7 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
 def check_and_enforce_billing(device_obj):
     """
     Evaluates latest reading for device against free limit and monthly cutoff.
-    - If total_l > free_limit_l: generates bill for unbilled excess.
+    - If total_l > free_limit_l: generates bill for unbilled excess (especially upon reaching monthly cutoff).
     - If total_l >= monthly_limit_l: automatically turns relay OFF.
     """
     latest_reading = (
@@ -228,7 +234,8 @@ def check_and_enforce_billing(device_obj):
         raw_excess = total_l - device_obj.free_limit_l
         unbilled_excess_l = max(0.0, raw_excess - already_billed_l)
 
-        if (len(all_bills) == 0 and unbilled_excess_l > 0) or unbilled_excess_l >= MIN_REBILL_L:
+        is_monthly_breach = total_l >= device_obj.monthly_limit_l
+        if (len(all_bills) == 0 and unbilled_excess_l > 0) or (is_monthly_breach and unbilled_excess_l > 0) or unbilled_excess_l >= MIN_REBILL_L:
             excess_l_to_bill = round(unbilled_excess_l, 2)
             if excess_l_to_bill <= 0.0:
                 excess_l_to_bill = 0.1
