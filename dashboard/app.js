@@ -29,10 +29,10 @@
 
   const state = {
     deviceId: config.DEVICE_ID,
-    totalUsageLitres: 460.0, // starts in free zone for realistic demo progression
+    totalUsageLitres: 0.0, // starts at 0.0, populated from live backend and sensor
     freeLimitLitres: parseFloat(localStorage.getItem('aquapulse_free_limit')) || config.DEFAULT_FREE_LIMIT_L || 500,
     monthlyLimitLitres: parseFloat(localStorage.getItem('aquapulse_monthly_limit')) || config.DEFAULT_MONTHLY_LIMIT_L || 1000,
-    flowRateLpm: 2.4,
+    flowRateLpm: 0.0,
     relayState: 'ON', // 'ON' | 'OFF'
     deviceStatus: 'online', // 'online' | 'offline'
     ratePerLitre: parseFloat(localStorage.getItem('aquapulse_rate_per_l')) || config.DEFAULT_RATE_PER_L || 0.10,
@@ -460,9 +460,7 @@
 
               state.flowRateLpm = flow;
               state.lastMqttTelemetryTime = Date.now();
-              if (incomingTotal >= state.totalUsageLitres) {
-                state.totalUsageLitres = incomingTotal;
-              }
+              state.totalUsageLitres = incomingTotal;
 
               UI.renderFlow(state.flowRateLpm);
               UI.renderUsage({
@@ -1241,8 +1239,7 @@
       const rawUsage = await ApiClient.getUsage(state.deviceId);
       const usage = normalizeUsageData(rawUsage);
 
-      // Monotonic protection: never drop litres used backwards
-      state.totalUsageLitres = Math.max(state.totalUsageLitres, usage.total);
+      state.totalUsageLitres = usage.total;
       state.freeLimitLitres = usage.free_limit;
       state.monthlyLimitLitres = usage.limit;
       state.ratePerLitre = usage.rate_per_l;
@@ -1433,6 +1430,7 @@
           // Immediately reset UI & Gauge to 0.0 L and Safe Green
           UI.renderUsage({
             total: 0.0,
+            free_limit: state.freeLimitLitres,
             limit: state.monthlyLimitLitres,
             rate_per_l: state.ratePerLitre,
             flow_lpm: 0.0,
