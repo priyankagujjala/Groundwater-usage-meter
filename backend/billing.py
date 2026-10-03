@@ -135,9 +135,23 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
 
     # 3. Billing Generation Logic (Triggers when usage exceeds free_limit_l)
     if total_l > device.free_limit_l:
-        all_bills = Bill.query.filter_by(device_id=device.id).all()
-        already_billed_l = sum(b.excess_l for b in all_bills)
-        raw_excess = total_l - device.free_limit_l
+        raw_excess = max(0.0, total_l - device.free_limit_l)
+
+        # Look for cycle start reading (total_l <= 0.0)
+        latest_reset = (
+            Reading.query.filter_by(device_id=device.id)
+            .filter(Reading.total_l <= 0.0)
+            .order_by(Reading.ts.desc(), Reading.id.desc())
+            .first()
+        )
+        if latest_reset and latest_reset.ts:
+            cycle_bills = Bill.query.filter(Bill.device_id == device.id, Bill.ts >= latest_reset.ts).all()
+        else:
+            cycle_bills = Bill.query.filter_by(device_id=device.id).all()
+
+        # Only count paid bills whose excess belongs to this current cycle
+        valid_paid_bills = [b for b in cycle_bills if b.status == "paid" and b.excess_l <= raw_excess]
+        already_billed_l = sum(b.excess_l for b in valid_paid_bills)
         unbilled_excess_l = max(0.0, raw_excess - already_billed_l)
 
         should_create_bill = False
@@ -145,8 +159,21 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
 
         is_monthly_cutoff = total_l >= device.monthly_limit_l
 
-        if len(all_bills) == 0:
-            # First breach of free tier
+        # Check if there is an active unpaid bill in current cycle
+        active_unpaid_bill = Bill.query.filter_by(device_id=device.id, status="unpaid").order_by(Bill.ts.desc(), Bill.id.desc()).first()
+
+        if active_unpaid_bill:
+            # Update the existing unpaid bill with the latest excess and amount
+            excess_l_to_bill = round(raw_excess - already_billed_l, 2)
+            if excess_l_to_bill <= 0.0:
+                excess_l_to_bill = round(raw_excess, 2)
+            amount = max(0.01, round(excess_l_to_bill * device.rate_per_l, 2))
+            active_unpaid_bill.excess_l = excess_l_to_bill
+            active_unpaid_bill.amount = amount
+            bill_created = active_unpaid_bill.to_dict()
+            action = "MONTHLY_LIMIT_EXCEEDED_BILL_CREATED" if is_monthly_cutoff else "FREE_LIMIT_EXCEEDED_BILL_CREATED"
+        elif len(cycle_bills) == 0 or len(valid_paid_bills) == 0:
+            # First breach of free tier in this cycle
             should_create_bill = True
             excess_l_to_bill = round(unbilled_excess_l, 2)
             if excess_l_to_bill <= 0.0:
@@ -160,7 +187,7 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
             should_create_bill = True
             excess_l_to_bill = round(unbilled_excess_l, 2)
 
-        if should_create_bill and excess_l_to_bill > 0:
+        if should_create_bill and excess_l_to_bill > 0 and not active_unpaid_bill:
             amount = round(excess_l_to_bill * device.rate_per_l, 2)
             if amount <= 0.0:
                 amount = 0.01
@@ -181,7 +208,7 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
                 f"[BILL GENERATED] Device '{device_name}' (Total: {total_l:.2f}L, Free: {device.free_limit_l:.2f}L, Cutoff: {device.monthly_limit_l:.2f}L). "
                 f"Generated Bill #{new_bill.id} for {excess_l_to_bill:.2f}L excess = ₹{amount:.2f}."
             )
-        else:
+        elif not active_unpaid_bill:
             action = "PAID_TIER_USAGE"
 
     # 4. Relay Cutoff Enforcement (Triggers when total_l hits monthly_limit_l)
@@ -212,7 +239,7 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
 def check_and_enforce_billing(device_obj):
     """
     Evaluates latest reading for device against free limit and monthly cutoff.
-    - If total_l > free_limit_l: generates bill for unbilled excess (especially upon reaching monthly cutoff).
+    - If total_l > free_limit_l: generates or updates bill for unbilled excess.
     - If total_l >= monthly_limit_l: automatically turns relay OFF.
     """
     latest_reading = (
@@ -228,19 +255,39 @@ def check_and_enforce_billing(device_obj):
 
     # 1. Billing generation for excess over free limit
     if total_l > device_obj.free_limit_l:
-        all_bills = Bill.query.filter_by(device_id=device_obj.id).all()
-        already_billed_l = sum(b.excess_l for b in all_bills)
-        raw_excess = total_l - device_obj.free_limit_l
+        raw_excess = max(0.0, total_l - device_obj.free_limit_l)
+
+        latest_reset = (
+            Reading.query.filter_by(device_id=device_obj.id)
+            .filter(Reading.total_l <= 0.0)
+            .order_by(Reading.ts.desc(), Reading.id.desc())
+            .first()
+        )
+        if latest_reset and latest_reset.ts:
+            cycle_bills = Bill.query.filter(Bill.device_id == device_obj.id, Bill.ts >= latest_reset.ts).all()
+        else:
+            cycle_bills = Bill.query.filter_by(device_id=device_obj.id).all()
+
+        valid_paid_bills = [b for b in cycle_bills if b.status == "paid" and b.excess_l <= raw_excess]
+        already_billed_l = sum(b.excess_l for b in valid_paid_bills)
         unbilled_excess_l = max(0.0, raw_excess - already_billed_l)
 
-        is_monthly_breach = total_l >= device_obj.monthly_limit_l
-        if (len(all_bills) == 0 and unbilled_excess_l > 0) or (is_monthly_breach and unbilled_excess_l > 0) or unbilled_excess_l >= MIN_REBILL_L or unbilled_excess_l > 0:
+        active_unpaid_bill = Bill.query.filter_by(device_id=device_obj.id, status="unpaid").order_by(Bill.ts.desc(), Bill.id.desc()).first()
+
+        if active_unpaid_bill:
+            excess_l_to_bill = round(raw_excess - already_billed_l, 2)
+            if excess_l_to_bill <= 0.0:
+                excess_l_to_bill = round(raw_excess, 2)
+            amount = max(0.01, round(excess_l_to_bill * device_obj.rate_per_l, 2))
+            active_unpaid_bill.excess_l = excess_l_to_bill
+            active_unpaid_bill.amount = amount
+            created_bill = active_unpaid_bill
+            db.session.commit()
+        elif unbilled_excess_l > 0 or total_l >= device_obj.monthly_limit_l:
             excess_l_to_bill = round(unbilled_excess_l, 2)
             if excess_l_to_bill <= 0.0:
                 excess_l_to_bill = 0.1
-            amount = round(excess_l_to_bill * device_obj.rate_per_l, 2)
-            if amount <= 0.0:
-                amount = 0.01
+            amount = max(0.01, round(excess_l_to_bill * device_obj.rate_per_l, 2))
 
             new_bill = Bill(
                 device_id=device_obj.id,

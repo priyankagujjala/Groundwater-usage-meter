@@ -1150,7 +1150,9 @@
   async function initiatePayment(billId, buttonEl) {
     if (!billId) return;
 
+    let originalHtml = '';
     if (buttonEl) {
+      originalHtml = buttonEl.innerHTML;
       buttonEl.disabled = true;
       buttonEl.innerHTML = `<span class="spinner-sm"></span> Opening Checkout...`;
     }
@@ -1209,7 +1211,9 @@
     } finally {
       if (buttonEl) {
         buttonEl.disabled = false;
-        buttonEl.innerHTML = `<i class="fa-solid fa-credit-card"></i> Pay Now`;
+        if (originalHtml) {
+          buttonEl.innerHTML = originalHtml;
+        }
       }
     }
   }
@@ -1658,33 +1662,56 @@
           if (unpaid) billId = unpaid.id;
         }
 
+        const originalBtnHtml = UI.elements.btnQuickPayCard.innerHTML;
+
         // If no unpaid bill is present yet but excess > 0, generate bill immediately
         if (!billId) {
           try {
             UI.elements.btnQuickPayCard.disabled = true;
-            UI.elements.btnQuickPayCard.innerHTML = `<span class="spinner-sm"></span> Preparing Invoice...`;
+            UI.elements.btnQuickPayCard.innerHTML = `<span class="spinner-sm"></span> Opening Checkout...`;
+            
+            // Sync usage & check billing on backend
             await ApiClient.ingestTelemetry({
               device: state.deviceId,
               flow_lpm: state.flowRateLpm,
               litres: 0.0,
               total: state.totalUsageLitres
-            });
-            const refreshedBills = await ApiClient.getBills(state.deviceId);
-            state.bills = refreshedBills;
-            UI.renderBills(refreshedBills);
-            const newUnpaid = refreshedBills.find(b => (b.status || '').toLowerCase() === 'unpaid');
-            if (newUnpaid) {
-              billId = newUnpaid.id;
+            }).catch(() => {});
+
+            const refreshedBills = await ApiClient.getBills(state.deviceId).catch(() => []);
+            if (refreshedBills && refreshedBills.length > 0) {
+              state.bills = refreshedBills;
+              UI.renderBills(refreshedBills);
+              const newUnpaid = refreshedBills.find(b => (b.status || '').toLowerCase() === 'unpaid');
+              if (newUnpaid) {
+                billId = newUnpaid.id;
+                UI.elements.btnQuickPayCard.setAttribute('data-bill-id', newUnpaid.id);
+              }
             }
           } catch (err) {
             console.warn('Bill generation check warning:', err);
           } finally {
             UI.elements.btnQuickPayCard.disabled = false;
+            UI.elements.btnQuickPayCard.innerHTML = originalBtnHtml;
           }
         }
 
         if (billId) {
           initiatePayment(billId, UI.elements.btnQuickPayCard);
+        } else if (state.totalUsageLitres > state.freeLimitLitres) {
+          const excess = +(state.totalUsageLitres - state.freeLimitLitres).toFixed(2);
+          const amt = +(excess * state.ratePerLitre).toFixed(2);
+          const fallbackBill = {
+            id: `INV-${Date.now().toString().slice(-5)}`,
+            device_id: state.deviceId,
+            excess_l: excess,
+            amount: amt > 0 ? amt : 0.05,
+            status: 'unpaid',
+            ts: new Date().toISOString()
+          };
+          state.bills.unshift(fallbackBill);
+          UI.renderBills(state.bills);
+          initiatePayment(fallbackBill.id, UI.elements.btnQuickPayCard);
         } else {
           UI.showAlert('No unpaid excess usage bill found to pay.', 'warning');
         }
