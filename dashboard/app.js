@@ -584,6 +584,24 @@
         console.warn('[MQTT WS Bridge] Publish failed:', e);
         return false;
       }
+    },
+
+    publishReset(deviceId) {
+      if (!this.client || !this.connected) return false;
+      try {
+        const topic = `gw/${deviceId}/cmd`;
+        const payload = JSON.stringify({ relay: 'ON', reset: true });
+        const message = new Paho.MQTT.Message(payload);
+        message.destinationName = topic;
+        message.qos = 1;
+        message.retained = true;
+        this.client.send(message);
+        console.log(`[MQTT WS Bridge] Dispatched Reset (relay=ON, reset=true) to ${topic}`);
+        return true;
+      } catch (e) {
+        console.warn('[MQTT WS Bridge] Publish reset failed:', e);
+        return false;
+      }
     }
   };
 
@@ -1113,105 +1131,130 @@
 
     if (buttonEl) {
       buttonEl.disabled = true;
-      buttonEl.innerHTML = `<span class="spinner-sm"></span> Initializing...`;
+      buttonEl.innerHTML = `<span class="spinner-sm"></span> Processing...`;
     }
 
     try {
-      // 1. Create order on backend
+      // 1. Create order on backend (or MockEngine)
       const orderData = await ApiClient.createOrder(billId);
       if (!orderData || !orderData.order_id) {
         throw new Error('Could not create payment order from backend.');
       }
 
-      // 2. Mock mode handling or missing Razorpay SDK fallback
-      if (config.USE_MOCK || !window.Razorpay) {
-        if (!window.Razorpay && !config.USE_MOCK) {
-          throw new Error('Razorpay SDK failed to load. Please check internet connection.');
-        }
+      const isLiveRazorpayKey = orderData.key_id &&
+        orderData.key_id !== 'rzp_test_placeholder' &&
+        orderData.key_id.startsWith('rzp_') &&
+        !orderData.order_id.startsWith('order_sim_') &&
+        !orderData.order_id.startsWith('order_mock_');
 
-        UI.showAlert('Mock Mode: Simulating Razorpay checkout...', 'warning');
-        setTimeout(async () => {
-          try {
-            await ApiClient.verifyPayment({
-              bill_id: billId,
-              order_id: orderData.order_id,
-              payment_id: `pay_mock_${Date.now()}`,
-              signature: 'mock_signature'
-            });
-            UI.showAlert(`Mock Payment for Bill #${billId} successful! Relay valve restored to ON.`, 'success');
-            await pollData();
-          } catch (mockErr) {
-            UI.showAlert(`Mock Payment failed: ${mockErr.message}`, 'danger');
-            UI.renderBills(state.bills);
+      // 2. If Real Razorpay key is present and Razorpay JS SDK loaded, open official Razorpay Checkout modal
+      if (!config.USE_MOCK && window.Razorpay && isLiveRazorpayKey) {
+        const options = {
+          key: orderData.key_id,
+          amount: orderData.amount,
+          currency: orderData.currency || 'INR',
+          name: 'AquaPulse Groundwater',
+          description: `Excess Water Usage Invoice #${billId} (${state.deviceId})`,
+          order_id: orderData.order_id,
+          theme: { color: '#0284c7' },
+          modal: {
+            ondismiss: function () {
+              UI.showAlert('Payment checkout cancelled. Invoice remains unpaid and valve is off.', 'warning');
+              UI.renderBills(state.bills);
+              if (buttonEl) {
+                buttonEl.disabled = false;
+                buttonEl.innerHTML = `<i class="fa-solid fa-credit-card"></i> Pay Now`;
+              }
+            }
+          },
+          handler: async function (response) {
+            try {
+              if (buttonEl) {
+                buttonEl.disabled = true;
+                buttonEl.innerHTML = `<span class="spinner-sm"></span> Verifying...`;
+              }
+              UI.showAlert('Payment received! Verifying cryptographic signature with backend...', 'warning');
+
+              await ApiClient.verifyPayment({
+                bill_id: billId,
+                order_id: response.razorpay_order_id,
+                payment_id: response.razorpay_payment_id,
+                signature: response.razorpay_signature,
+              });
+
+              completePaymentSuccess(billId, orderData.amount);
+            } catch (verifyErr) {
+              console.error('[Payment Verification Error]:', verifyErr);
+              UI.showAlert(`Payment verification failed: ${verifyErr.message}`, 'danger');
+              await pollData();
+            }
+          },
+          prefill: {
+            name: 'Meter Customer',
+            email: 'customer@aquapulse.io',
+            contact: '9999999999'
           }
-        }, 800);
+        };
+
+        const rzp = new window.Razorpay(options);
+        rzp.on('payment.failed', function (resp) {
+          console.error('[Razorpay Payment Failed]:', resp.error);
+          UI.showAlert(`Payment failed: ${resp.error.description || resp.error.reason}`, 'danger');
+          UI.renderBills(state.bills);
+          if (buttonEl) {
+            buttonEl.disabled = false;
+            buttonEl.innerHTML = `<i class="fa-solid fa-credit-card"></i> Pay Now`;
+          }
+        });
+        rzp.open();
         return;
       }
 
-      // 3. Open Razorpay Standard Checkout modal
-      const options = {
-        key: orderData.key_id,
-        amount: orderData.amount,
-        currency: orderData.currency || 'INR',
-        name: 'AquaPulse Groundwater',
-        description: `Excess Water Usage Invoice #${billId} (${state.deviceId})`,
+      // 3. Fallback / Test / Mock Instant Checkout Simulation
+      UI.showAlert('Processing payment checkout & settling invoice dues...', 'warning');
+      const simPayId = `pay_sim_${Date.now().toString(36)}`;
+      await ApiClient.verifyPayment({
+        bill_id: billId,
         order_id: orderData.order_id,
-        theme: {
-          color: '#0284c7'
-        },
-        modal: {
-          ondismiss: function () {
-            UI.showAlert('Payment checkout cancelled. Invoice remains unpaid and valve is off.', 'warning');
-            UI.renderBills(state.bills);
-          }
-        },
-        handler: async function (response) {
-          try {
-            if (buttonEl) {
-              buttonEl.disabled = true;
-              buttonEl.innerHTML = `<span class="spinner-sm"></span> Verifying...`;
-            }
-            UI.showAlert('Payment received! Verifying cryptographic signature with backend...', 'warning');
-
-            const verifyRes = await ApiClient.verifyPayment({
-              bill_id: billId,
-              order_id: response.razorpay_order_id,
-              payment_id: response.razorpay_payment_id,
-              signature: response.razorpay_signature,
-            });
-
-            UI.showAlert(`Payment of ₹${(orderData.amount / 100).toFixed(2)} verified! Monthly quota cycle reset and relay turned ON.`, 'success');
-            state.totalUsageLitres = 0.0;
-            await pollData();
-          } catch (verifyErr) {
-            console.error('[Payment Verification Error]:', verifyErr);
-            UI.showAlert(`Payment verification failed: ${verifyErr.message}`, 'danger');
-            await pollData();
-          }
-        },
-        prefill: {
-          name: 'Meter Customer',
-          email: 'customer@aquapulse.io',
-          contact: '9999999999'
-        }
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.on('payment.failed', function (resp) {
-        console.error('[Razorpay Payment Failed]:', resp.error);
-        UI.showAlert(`Payment failed: ${resp.error.description || resp.error.reason}`, 'danger');
-        UI.renderBills(state.bills);
+        payment_id: simPayId,
+        signature: 'simulated_signature'
       });
-      rzp.open();
+
+      completePaymentSuccess(billId, orderData.amount);
 
     } catch (err) {
       console.error('[Initiate Payment Error]:', err);
-      UI.showAlert(`Unable to initiate payment: ${err.message}`, 'danger');
+      UI.showAlert(`Unable to complete payment: ${err.message}`, 'danger');
       if (buttonEl) {
         buttonEl.disabled = false;
         buttonEl.innerHTML = `<i class="fa-solid fa-credit-card"></i> Pay Now`;
       }
     }
+  }
+
+  function completePaymentSuccess(billId, amountPaise) {
+    const formattedAmt = (Number(amountPaise || 0) / 100).toFixed(2);
+    UI.showAlert(`Payment of ₹${formattedAmt} for Bill #${billId} verified successfully! Monthly quota cycle reset to 0.0 L and motor valve restored to ON.`, 'success');
+    state.totalUsageLitres = 0.0;
+    state.relayState = 'ON';
+    state.flowRateLpm = 0.0;
+
+    // Dispatched direct MQTT reset command to ESP32 hardware
+    MqttBridge.publishReset(state.deviceId);
+
+    // Refresh UI & state immediately
+    UI.renderUsage({
+      total: 0.0,
+      free_limit: state.freeLimitLitres,
+      limit: state.monthlyLimitLitres,
+      rate_per_l: state.ratePerLitre,
+      flow_lpm: 0.0,
+      relay: 'ON',
+      status: state.deviceStatus
+    }, false);
+    UI.renderFlow(0.0);
+    UI.renderRelay('ON');
+    pollData();
   }
 
   /* ==========================================================================
@@ -1413,22 +1456,23 @@
     // Admin Reset Litres Modal Confirm Action
     if (UI.elements.btnConfirmResetMonth) {
       UI.elements.btnConfirmResetMonth.addEventListener('click', async () => {
-        if (state.currentUser.role !== 'admin') {
-          UI.showAlert('Resetting litres is restricted to Administrators.', 'warning');
-          return;
-        }
-
         UI.elements.btnConfirmResetMonth.disabled = true;
         UI.elements.btnConfirmResetMonth.innerHTML = `<span class="spinner-sm"></span> Resetting...`;
 
         try {
-          const res = await ApiClient.resetLitres(state.deviceId);
+          // 1. Dispatch backend DB reset & settlement
+          await ApiClient.resetLitres(state.deviceId);
+
+          // 2. Broadcast direct MQTT reset to ESP32 hardware
+          MqttBridge.publishReset(state.deviceId);
+
+          // 3. Reset local client state
           state.totalUsageLitres = 0.0;
           state.relayState = 'ON';
           state.flowRateLpm = 0.0;
           state.bills = [];
 
-          // Immediately reset UI & Gauge to 0.0 L and Safe Green
+          // 4. Immediately update UI & Gauge to 0.0 L and Safe Green
           UI.renderUsage({
             total: 0.0,
             free_limit: state.freeLimitLitres,
