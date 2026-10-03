@@ -234,7 +234,7 @@ def check_and_enforce_billing(device_obj):
         unbilled_excess_l = max(0.0, raw_excess - already_billed_l)
 
         is_monthly_breach = total_l >= device_obj.monthly_limit_l
-        if (len(all_bills) == 0 and unbilled_excess_l > 0) or (is_monthly_breach and unbilled_excess_l > 0) or unbilled_excess_l >= MIN_REBILL_L:
+        if (len(all_bills) == 0 and unbilled_excess_l > 0) or (is_monthly_breach and unbilled_excess_l > 0) or unbilled_excess_l >= MIN_REBILL_L or unbilled_excess_l > 0:
             excess_l_to_bill = round(unbilled_excess_l, 2)
             if excess_l_to_bill <= 0.0:
                 excess_l_to_bill = 0.1
