@@ -30,12 +30,12 @@
   const state = {
     deviceId: config.DEVICE_ID,
     totalUsageLitres: 460.0, // starts in free zone for realistic demo progression
-    freeLimitLitres: config.DEFAULT_FREE_LIMIT_L || 500,
-    monthlyLimitLitres: config.DEFAULT_MONTHLY_LIMIT_L || 1000,
+    freeLimitLitres: parseFloat(localStorage.getItem('aquapulse_free_limit')) || config.DEFAULT_FREE_LIMIT_L || 500,
+    monthlyLimitLitres: parseFloat(localStorage.getItem('aquapulse_monthly_limit')) || config.DEFAULT_MONTHLY_LIMIT_L || 1000,
     flowRateLpm: 2.4,
     relayState: 'ON', // 'ON' | 'OFF'
     deviceStatus: 'online', // 'online' | 'offline'
-    ratePerLitre: config.DEFAULT_RATE_PER_L || 0.10,
+    ratePerLitre: parseFloat(localStorage.getItem('aquapulse_rate_per_l')) || config.DEFAULT_RATE_PER_L || 0.10,
     readingsHistory: [],
     bills: [],
     pollTimer: null,
@@ -438,6 +438,34 @@
 
         this.client.onMessageArrived = (message) => {
           console.log(`[MQTT WS Bridge] Telemetry received on ${message.destinationName}:`, message.payloadString);
+          try {
+            const data = JSON.parse(message.payloadString);
+            if (data && typeof data === 'object') {
+              if (data.flow_lpm !== undefined || data.flow !== undefined) {
+                const flow = Number(data.flow_lpm ?? data.flow);
+                state.flowRateLpm = flow;
+                UI.renderFlow(flow);
+              }
+              if (data.total_l !== undefined || data.total !== undefined) {
+                const total = Number(data.total_l ?? data.total);
+                state.totalUsageLitres = total;
+                UI.renderUsage({
+                  total: state.totalUsageLitres,
+                  free_limit: state.freeLimitLitres,
+                  limit: state.monthlyLimitLitres,
+                  rate_per_l: state.ratePerLitre,
+                  flow_lpm: state.flowRateLpm,
+                  relay: state.relayState,
+                  status: 'online'
+                });
+              }
+              if (data.relay !== undefined || data.state !== undefined) {
+                const r = String(data.relay ?? data.state).toUpperCase();
+                state.relayState = r;
+                UI.renderRelay(r);
+              }
+            }
+          } catch (_) {}
         };
 
         this.connect();
@@ -531,12 +559,12 @@
   function normalizeUsageData(raw) {
     return {
       total: raw.total ?? raw.total_l ?? raw.litres_total ?? state.totalUsageLitres,
-      free_limit: raw.free_limit ?? raw.free_limit_l ?? config.DEFAULT_FREE_LIMIT_L ?? 500,
-      limit: raw.limit ?? raw.monthly_limit_l ?? raw.limit_l ?? config.DEFAULT_MONTHLY_LIMIT_L ?? 1000,
+      free_limit: raw.free_limit ?? raw.free_limit_l ?? state.freeLimitLitres ?? config.DEFAULT_FREE_LIMIT_L ?? 500,
+      limit: raw.limit ?? raw.monthly_limit_l ?? raw.limit_l ?? state.monthlyLimitLitres ?? config.DEFAULT_MONTHLY_LIMIT_L ?? 1000,
       flow_lpm: raw.flow_lpm ?? raw.flow_rate ?? raw.flowRate ?? 0.0,
       relay: (raw.relay ?? raw.relay_state ?? raw.relay_status ?? 'ON').toUpperCase(),
       status: raw.status ?? raw.device_status ?? 'online',
-      rate_per_l: raw.rate_per_l ?? raw.rate ?? config.DEFAULT_RATE_PER_L ?? 0.10,
+      rate_per_l: raw.rate_per_l ?? raw.rate ?? state.ratePerLitre ?? config.DEFAULT_RATE_PER_L ?? 0.10,
     };
   }
 
@@ -764,6 +792,7 @@
       quotaModalOverlay: document.getElementById('quota-modal-overlay'),
       btnCloseQuotaModal: document.getElementById('btn-close-quota-modal'),
       btnCancelQuota: document.getElementById('btn-cancel-quota'),
+      btnSaveQuota: document.getElementById('btn-save-quota'),
       formUpdateQuota: document.getElementById('form-update-quota'),
       inputQuotaDevice: document.getElementById('input-quota-device'),
       inputQuotaFreeLimit: document.getElementById('input-quota-free-limit'),
@@ -1182,10 +1211,23 @@
       const usage = normalizeUsageData(rawUsage);
 
       state.totalUsageLitres = usage.total;
+      state.freeLimitLitres = usage.free_limit;
       state.monthlyLimitLitres = usage.limit;
+      state.ratePerLitre = usage.rate_per_l;
       state.flowRateLpm = usage.flow_lpm;
       state.relayState = usage.relay;
       state.deviceStatus = usage.status;
+
+      // Keep localStorage in sync with backend truth if received
+      if (rawUsage && (rawUsage.free_limit !== undefined || rawUsage.free_limit_l !== undefined)) {
+        localStorage.setItem('aquapulse_free_limit', usage.free_limit);
+      }
+      if (rawUsage && (rawUsage.limit !== undefined || rawUsage.monthly_limit_l !== undefined)) {
+        localStorage.setItem('aquapulse_monthly_limit', usage.limit);
+      }
+      if (rawUsage && (rawUsage.rate_per_l !== undefined || rawUsage.rate !== undefined)) {
+        localStorage.setItem('aquapulse_rate_per_l', usage.rate_per_l);
+      }
 
       // 2. Fetch bills to determine unpaid status
       const bills = await ApiClient.getBills(state.deviceId);
@@ -1396,9 +1438,13 @@
     if (UI.elements.formUpdateQuota) {
       UI.elements.formUpdateQuota.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const freeLimitVal = parseFloat(UI.elements.inputQuotaFreeLimit ? UI.elements.inputQuotaFreeLimit.value : state.freeLimitLitres);
-        const limitVal = parseFloat(UI.elements.inputQuotaLimit.value);
-        const rateVal = parseFloat(UI.elements.inputQuotaRate.value);
+        const freeInput = UI.elements.inputQuotaFreeLimit || document.getElementById('input-quota-free-limit');
+        const limitInput = UI.elements.inputQuotaLimit || document.getElementById('input-quota-limit');
+        const rateInput = UI.elements.inputQuotaRate || document.getElementById('input-quota-rate');
+
+        const freeLimitVal = parseFloat(freeInput ? freeInput.value : state.freeLimitLitres);
+        const limitVal = parseFloat(limitInput ? limitInput.value : state.monthlyLimitLitres);
+        const rateVal = parseFloat(rateInput ? rateInput.value : state.ratePerLitre);
 
         if (isNaN(freeLimitVal) || freeLimitVal < 0) {
           UI.showAlert('Free limit must be 0 or a positive number.', 'warning');
@@ -1413,16 +1459,50 @@
           return;
         }
 
+        const saveBtn = UI.elements.btnSaveQuota || document.getElementById('btn-save-quota');
+        const originalBtnHtml = saveBtn ? saveBtn.innerHTML : '<i class="fa-solid fa-check"></i> Save Limits';
+        if (saveBtn) {
+          saveBtn.disabled = true;
+          saveBtn.innerHTML = `<span class="spinner-sm"></span> Saving...`;
+        }
+
+        // Apply immediately to state & local storage for instant UI responsiveness
+        state.freeLimitLitres = freeLimitVal;
+        state.monthlyLimitLitres = limitVal;
+        state.ratePerLitre = rateVal;
+        localStorage.setItem('aquapulse_free_limit', freeLimitVal);
+        localStorage.setItem('aquapulse_monthly_limit', limitVal);
+        localStorage.setItem('aquapulse_rate_per_l', rateVal);
+
+        // Immediate UI re-render with updated limits
+        UI.renderUsage({
+          total: state.totalUsageLitres,
+          free_limit: freeLimitVal,
+          limit: limitVal,
+          rate_per_l: rateVal,
+          flow_lpm: state.flowRateLpm,
+          relay: state.relayState,
+          status: state.deviceStatus
+        });
+
+        // Close modal immediately
+        if (UI.elements.quotaModalOverlay) UI.elements.quotaModalOverlay.style.display = 'none';
+
         try {
           await ApiClient.updateQuota(state.deviceId, freeLimitVal, limitVal, rateVal);
-          state.freeLimitLitres = freeLimitVal;
-          state.monthlyLimitLitres = limitVal;
-          state.ratePerLitre = rateVal;
-          if (UI.elements.quotaModalOverlay) UI.elements.quotaModalOverlay.style.display = 'none';
-          UI.showAlert(`Limits updated: Free ${freeLimitVal}L, Monthly Cutoff ${limitVal}L, Rate ₹${rateVal}/L`, 'success');
-          await pollData();
+          UI.showAlert(`Policy updated: Free ${freeLimitVal}L, Monthly Cutoff ${limitVal}L, Rate ₹${rateVal.toFixed(2)}/L`, 'success');
         } catch (err) {
-          UI.showAlert(`Failed to update limits: ${err.message}`, 'danger');
+          console.warn('[Quota Update Backend Sync Error]:', err);
+          UI.showAlert(`Limits saved locally (${freeLimitVal}L Free / ${limitVal}L Monthly). Note: backend sync pending (${err.message})`, 'warning');
+        } finally {
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalBtnHtml;
+          }
+          // Poll to refresh server readings and bills
+          try {
+            await pollData();
+          } catch (_) {}
         }
       });
     }
