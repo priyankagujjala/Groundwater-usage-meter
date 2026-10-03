@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -23,10 +24,11 @@
   <!-- App Stylesheet -->
   <link rel="stylesheet" href="style.css?v=2.0">
 </head>
+
 <body>
 
   <div class="app-container">
-    
+
     <!-- Top Header Navigation -->
     <header class="app-header">
       <div class="brand-section">
@@ -35,7 +37,8 @@
         </div>
         <div>
           <h1 class="brand-title">AquaPulse</h1>
-          <p class="brand-subtitle">Groundwater Meter & Quota Enforcement &bull; <span id="device-label">Device 1</span></p>
+          <p class="brand-subtitle">Groundwater Meter & Quota Enforcement &bull; <span id="device-label">Device 1</span>
+          </p>
         </div>
       </div>
 
@@ -64,7 +67,8 @@
         </span>
 
         <!-- Direct MQTT WebSockets Link Status & Config Button -->
-        <button class="btn-icon" id="btn-open-mqtt-modal" title="Direct EMQX MQTT Bridge Settings" aria-label="MQTT Bridge">
+        <button class="btn-icon" id="btn-open-mqtt-modal" title="Direct EMQX MQTT Bridge Settings"
+          aria-label="MQTT Bridge">
           <i class="fa-solid fa-tower-broadcast" id="mqtt-header-icon" style="color: var(--text-secondary);"></i>
         </button>
 
@@ -86,14 +90,16 @@
         <i class="fa-solid fa-triangle-exclamation" id="alert-icon"></i>
         <span id="alert-message">Monthly groundwater limit exceeded! Motor valve has been shut off.</span>
       </div>
-      <button class="btn-icon" style="width: 28px; height: 28px; font-size: 0.8rem; background: transparent; border: none; color: inherit;" id="close-alert-btn" aria-label="Close Alert">
+      <button class="btn-icon"
+        style="width: 28px; height: 28px; font-size: 0.8rem; background: transparent; border: none; color: inherit;"
+        id="close-alert-btn" aria-label="Close Alert">
         <i class="fa-solid fa-xmark"></i>
       </button>
     </div>
 
     <!-- Main Dashboard Grid -->
     <main class="dashboard-grid">
-      
+
       <!-- 1. Quota & Usage Gauge -->
       <section class="card col-gauge" id="card-gauge" aria-label="Water Usage Gauge">
         <div class="card-header">
@@ -116,7 +122,8 @@
           <div class="gauge-center-content">
             <span class="gauge-used-val" id="gauge-used-litres">0.0</span>
             <span class="gauge-unit">Litres Used</span>
-            <span class="gauge-limit-subtext">Free: <strong id="gauge-free-litres">500</strong> L &bull; Cutoff: <strong id="gauge-limit-litres">1000</strong> L</span>
+            <span class="gauge-limit-subtext">Free: <strong id="gauge-free-litres">500</strong> L &bull; Cutoff: <strong
+                id="gauge-limit-litres">1000</strong> L</span>
           </div>
         </div>
 
@@ -124,7 +131,8 @@
           <span style="font-size: 0.8rem; color: var(--text-muted);" id="gauge-status-desc">
             Consumption within free allowance (Gauge is Green)
           </span>
-          <span id="month-days-left-text" style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+          <span id="month-days-left-text"
+            style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
             <i class="fa-regular fa-clock"></i> <span id="days-remaining-val">--</span> days remaining in this month
           </span>
         </div>
@@ -205,14 +213,17 @@
 
       <!-- 5. Tariff & Quota Summary Info -->
       <section class="card col-info" aria-label="Tariff and Limits">
-        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div class="card-header"
+          style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
           <h2 class="card-title"><i class="fa-solid fa-receipt"></i> Policy & Billing</h2>
           <!-- Admin Actions: Reset Litres & Edit Limits -->
           <div style="display: flex; gap: 6px; align-items: center;">
-            <button class="btn-pill btn-admin-reset-month" id="btn-open-reset-month-modal" style="display: inline-flex;" title="Reset Monthly Litres Usage (Admin)">
+            <button class="btn-pill btn-admin-reset-month" id="btn-open-reset-month-modal" style="display: inline-flex;"
+              title="Reset Monthly Litres Usage (Admin)">
               <i class="fa-solid fa-arrows-rotate"></i> Reset Litres
             </button>
-            <button class="btn-pill" id="btn-open-quota-modal" style="display: inline-flex;" title="Edit Quota & Tariff">
+            <button class="btn-pill" id="btn-open-quota-modal" style="display: inline-flex;"
+              title="Edit Quota & Tariff">
               <i class="fa-solid fa-sliders"></i> Edit Limits
             </button>
           </div>
@@ -240,7 +251,8 @@
             <span class="info-val" id="policy-excess-amount" style="color: var(--danger);">₹0.00</span>
           </div>
           <!-- User Quick Pay Button inside Policy & Billing Card -->
-          <div class="card-pay-action" id="card-pay-action-container" style="display: none; margin-top: 14px; text-align: center;">
+          <div class="card-pay-action" id="card-pay-action-container"
+            style="display: none; margin-top: 14px; text-align: center;">
             <button class="btn-pay-now" id="btn-quick-pay-card" style="width: 100%; padding: 10px; font-size: 0.9rem;">
               <i class="fa-solid fa-credit-card"></i> Pay Current Bill (<span id="quick-pay-amount">₹0.00</span>)
             </button>
@@ -251,7 +263,8 @@
       <!-- 6. Bills & Invoices Table -->
       <section class="card col-bills" aria-label="Billing Invoices">
         <div class="card-header">
-          <h2 class="card-title" id="bills-card-title"><i class="fa-solid fa-file-invoice-dollar"></i> Excess Usage Invoices & Payment Audit</h2>
+          <h2 class="card-title" id="bills-card-title"><i class="fa-solid fa-file-invoice-dollar"></i> Excess Usage
+            Invoices & Payment Audit</h2>
           <span style="font-size: 0.8rem; color: var(--text-muted);" id="bills-count">0 bills</span>
         </div>
 
@@ -271,7 +284,8 @@
             <tbody id="bills-table-body">
               <tr>
                 <td colspan="7" class="empty-state">
-                  <i class="fa-regular fa-folder-open" style="font-size: 1.5rem; display: block; margin-bottom: 8px;"></i>
+                  <i class="fa-regular fa-folder-open"
+                    style="font-size: 1.5rem; display: block; margin-bottom: 8px;"></i>
                   No excess bills generated yet. Consumption is within monthly limits.
                 </td>
               </tr>
@@ -295,10 +309,12 @@
         <button class="btn-mock" id="mock-btn-add-flow" title="Simulate drawing 50L of water">
           <i class="fa-solid fa-plus"></i> Add +50 L
         </button>
-        <button class="btn-mock" id="mock-btn-trigger-free-breach" title="Cross 500L Free Limit (Turns RED, billing starts, valve stays ON)">
+        <button class="btn-mock" id="mock-btn-trigger-free-breach"
+          title="Cross 500L Free Limit (Turns RED, billing starts, valve stays ON)">
           <i class="fa-solid fa-fire"></i> Cross Free Limit (>500L)
         </button>
-        <button class="btn-mock" id="mock-btn-trigger-breach" title="Hit 1000L Monthly Cutoff (Valve shuts OFF automatically)">
+        <button class="btn-mock" id="mock-btn-trigger-breach"
+          title="Hit 1000L Monthly Cutoff (Valve shuts OFF automatically)">
           <i class="fa-solid fa-radiation"></i> Hit Monthly Limit (≥1000L)
         </button>
         <button class="btn-mock" id="mock-btn-toggle-network" title="Simulate backend network drop">
@@ -401,7 +417,8 @@
           <label class="form-label" for="input-quota-free-limit">
             <i class="fa-solid fa-leaf" style="color: var(--success);"></i> Option 1: Free Litres Limit (Green Zone)
           </label>
-          <input type="number" id="input-quota-free-limit" class="form-input" min="0" step="any" placeholder="e.g. 500" required>
+          <input type="number" id="input-quota-free-limit" class="form-input" min="0" step="any" placeholder="e.g. 500"
+            required>
           <small style="color: var(--text-muted); font-size: 0.75rem; display: block; margin-top: 4px;">
             Water usage within this limit is free and the gauge displays <strong>Green</strong>.
           </small>
@@ -409,9 +426,11 @@
         <!-- Option 2: Monthly Water Usage Limit -->
         <div class="form-group">
           <label class="form-label" for="input-quota-limit">
-            <i class="fa-solid fa-shield-halved" style="color: var(--danger);"></i> Option 2: Monthly Water Usage Limit (Cutoff)
+            <i class="fa-solid fa-shield-halved" style="color: var(--danger);"></i> Option 2: Monthly Water Usage Limit
+            (Cutoff)
           </label>
-          <input type="number" id="input-quota-limit" class="form-input" min="0.1" step="any" placeholder="e.g. 1000" required>
+          <input type="number" id="input-quota-limit" class="form-input" min="0.1" step="any" placeholder="e.g. 1000"
+            required>
           <small style="color: var(--text-muted); font-size: 0.75rem; display: block; margin-top: 4px;">
             Once reached, the motor valve <strong>automatically turns OFF</strong>. Gauge remains <strong>Red</strong>.
           </small>
@@ -421,14 +440,16 @@
           <label class="form-label" for="input-quota-rate">
             <i class="fa-solid fa-coins" style="color: var(--accent-cyan);"></i> Excess Tariff Rate (₹ / Litre)
           </label>
-          <input type="number" id="input-quota-rate" class="form-input" min="0" step="any" placeholder="e.g. 0.10" required>
+          <input type="number" id="input-quota-rate" class="form-input" min="0" step="any" placeholder="e.g. 0.10"
+            required>
           <small style="color: var(--text-muted); font-size: 0.75rem; display: block; margin-top: 4px;">
             Bills start generating for every litre consumed after the free limit is crossed.
           </small>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn-secondary" id="btn-cancel-quota">Cancel</button>
-          <button type="submit" class="btn-primary" id="btn-save-quota"><i class="fa-solid fa-check"></i> Save Limits</button>
+          <button type="submit" class="btn-primary" id="btn-save-quota"><i class="fa-solid fa-check"></i> Save
+            Limits</button>
         </div>
       </form>
     </div>
@@ -445,9 +466,11 @@
       </div>
       <div class="modal-body" style="padding: 16px 0;">
         <p style="color: var(--text-primary); margin-bottom: 12px; font-size: 0.95rem;">
-          Are you sure you want to <strong>reset the litres usage for this month</strong> on <strong id="reset-modal-device-id" style="color: var(--accent-cyan);">device1</strong>?
+          Are you sure you want to <strong>reset the litres usage for this month</strong> on <strong
+            id="reset-modal-device-id" style="color: var(--accent-cyan);">device1</strong>?
         </p>
-        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid var(--success-border); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px;">
+        <div
+          style="background: rgba(16, 185, 129, 0.08); border: 1px solid var(--success-border); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px;">
           <ul style="color: var(--text-secondary); font-size: 0.85rem; padding-left: 18px; line-height: 1.6;">
             <li>Current month's usage resets to <strong>0.0 Litres (0%)</strong>.</li>
             <li>The Gauge resets to 0 and turns <strong>Green</strong>.</li>
@@ -458,7 +481,8 @@
       </div>
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="btn-cancel-reset-month">Cancel</button>
-        <button type="button" class="btn-primary" id="btn-confirm-reset-month" style="background: var(--success); border-color: var(--success);">
+        <button type="button" class="btn-primary" id="btn-confirm-reset-month"
+          style="background: var(--success); border-color: var(--success);">
           <i class="fa-solid fa-rotate"></i> Confirm Reset Litres
         </button>
       </div>
@@ -480,29 +504,38 @@
             Allows the browser to directly switch your physical ESP32 relay in real-time (&lt;30ms) via EMQX WebSockets.
           </p>
           <div style="margin-bottom: 12px;">
-            <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">EMQX Host</label>
-            <input type="text" id="input-mqtt-host" class="form-input" style="width: 100%;" value="e0615ec6.ala.asia-southeast1.emqxsl.com">
+            <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">EMQX
+              Host</label>
+            <input type="text" id="input-mqtt-host" class="form-input" style="width: 100%;"
+              value="e0615ec6.ala.asia-southeast1.emqxsl.com">
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
             <div>
-              <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">WSS Port</label>
+              <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">WSS
+                Port</label>
               <input type="number" id="input-mqtt-port" class="form-input" style="width: 100%;" value="8084">
             </div>
             <div>
-              <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">Status</label>
-              <div id="mqtt-bridge-status-indicator" style="padding: 8px 12px; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 600; background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid var(--danger-border); text-align: center;">
+              <label
+                style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">Status</label>
+              <div id="mqtt-bridge-status-indicator"
+                style="padding: 8px 12px; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 600; background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid var(--danger-border); text-align: center;">
                 Disconnected
               </div>
             </div>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div>
-              <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">MQTT Username</label>
-              <input type="text" id="input-mqtt-user" class="form-input" style="width: 100%;" placeholder="simulator_user">
+              <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">MQTT
+                Username</label>
+              <input type="text" id="input-mqtt-user" class="form-input" style="width: 100%;"
+                placeholder="simulator_user">
             </div>
             <div>
-              <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">MQTT Password</label>
-              <input type="password" id="input-mqtt-pass" class="form-input" style="width: 100%;" placeholder="Password">
+              <label style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px;">MQTT
+                Password</label>
+              <input type="password" id="input-mqtt-pass" class="form-input" style="width: 100%;"
+                placeholder="Password">
             </div>
           </div>
         </div>
@@ -521,4 +554,5 @@
   <script src="config.js?v=5.2"></script>
   <script src="app.js?v=5.2"></script>
 </body>
+
 </html>

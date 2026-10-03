@@ -1210,6 +1210,12 @@
         description: `Excess Usage Invoice #${billId} (${state.deviceId})`,
         image: 'https://cdn-icons-png.flaticon.com/512/3105/3105807.png',
         order_id: isRealRazorpayOrder ? orderData.order_id : undefined,
+        method: {
+          upi: true,
+          card: true,
+          netbanking: true,
+          wallet: true
+        },
         prefill: {
           name: state.currentUser?.username || 'Customer',
           email: 'test.customer@aquapulse.io',
