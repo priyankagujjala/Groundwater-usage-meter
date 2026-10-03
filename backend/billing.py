@@ -109,11 +109,13 @@ def process_reading(device_name: str, litres: float, total_l: float, flow_lpm: f
 
 def _execute_process_reading(device_name: str, litres: float, total_l: float, flow_lpm: float) -> dict:
     """
-    Updates runtime state, checks monthly limit threshold, creates bill (once per interval),
-    accounting for already-billed excess after payments, and enforces relay cut-off.
+    Updates runtime state, checks free limit threshold for per-litre billing,
+    and enforces automatic relay shut-off when the monthly limit is reached.
 
-    Note: The reading itself is already persisted by mqtt_client.py (_insert_reading_to_db)
-    so it is NOT duplicated here.
+    Dual-limit Policy:
+    1. 0 to free_limit_l: Free water allowance, no bills, relay ON.
+    2. free_limit_l to monthly_limit_l: Free limit crossed; generates bills per litre excess, relay remains ON.
+    3. >= monthly_limit_l: Monthly cutoff reached; automatic relay valve shut OFF.
     """
     # 1. Update in-memory runtime telemetry
     dev_state = get_device_state(device_name)
@@ -124,79 +126,68 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
     device = Device.query.filter_by(name=device_name).first()
     if not device:
         logger.info(f"Auto-registering device '{device_name}' with default limits.")
-        device = Device(name=device_name, monthly_limit_l=500.0, rate_per_l=0.10)
+        device = Device(name=device_name, free_limit_l=500.0, monthly_limit_l=1000.0, rate_per_l=0.10)
         db.session.add(device)
         db.session.commit()
 
     action = "RECORDED"
     bill_created = None
 
-    # 3. Limit and Billing Enforcement Logic:
-    if total_l >= device.monthly_limit_l:
-        # Check if an unpaid bill already exists using integer device.id
-        existing_unpaid_bill = Bill.query.filter_by(device_id=device.id, status="unpaid").first()
+    # 3. Billing Generation Logic (Triggers when usage exceeds free_limit_l)
+    if total_l > device.free_limit_l:
+        all_bills = Bill.query.filter_by(device_id=device.id).all()
+        already_billed_l = sum(b.excess_l for b in all_bills)
+        raw_excess = total_l - device.free_limit_l
+        unbilled_excess_l = max(0.0, raw_excess - already_billed_l)
 
-        if not existing_unpaid_bill:
-            # Calculate total excess already billed across all past bills (paid or unpaid)
-            all_bills = Bill.query.filter_by(device_id=device.id).all()
-            already_billed_l = sum(b.excess_l for b in all_bills)
-            raw_excess = total_l - device.monthly_limit_l
+        should_create_bill = False
+        excess_l_to_bill = 0.0
 
-            if len(all_bills) > 0 and (raw_excess - already_billed_l) > 0:
-                unbilled_excess_l = raw_excess - already_billed_l
-                is_cumulative_odometer = True
-            else:
-                unbilled_excess_l = raw_excess
-                is_cumulative_odometer = False
+        if len(all_bills) == 0:
+            # First breach of free tier
+            should_create_bill = True
+            excess_l_to_bill = round(unbilled_excess_l, 2)
+            if excess_l_to_bill <= 0.0:
+                excess_l_to_bill = round(float(litres) if litres > 0 else 0.1, 2)
+        elif unbilled_excess_l >= MIN_REBILL_L:
+            # Accumulated unbilled litres after prior bills
+            should_create_bill = True
+            excess_l_to_bill = round(unbilled_excess_l, 2)
 
-            should_create_bill = False
-            excess_l_to_bill = 0.0
+        if should_create_bill:
+            amount = round(excess_l_to_bill * device.rate_per_l, 2)
+            if amount <= 0.0:
+                amount = 0.01
 
-            if len(all_bills) == 0 or not is_cumulative_odometer:
-                # First breach of first cycle OR first breach of a new cycle after payment
-                should_create_bill = True
-                excess_l_to_bill = round(unbilled_excess_l, 2)
-                # Guarantee minimum measurable excess if at exact boundary
-                if excess_l_to_bill <= 0.0:
-                    excess_l_to_bill = round(float(litres) if litres > 0 else 0.1, 2)
-            elif unbilled_excess_l >= MIN_REBILL_L:
-                # Subsequent breach after earlier bill(s) paid on continuous odometer
-                should_create_bill = True
-                excess_l_to_bill = round(unbilled_excess_l, 2)
+            new_bill = Bill(
+                device_id=device.id,
+                excess_l=excess_l_to_bill,
+                amount=amount,
+                status="unpaid",
+                ts=datetime.now(timezone.utc)
+            )
+            db.session.add(new_bill)
+            db.session.flush() # assign new_bill.id
 
-            if should_create_bill:
-                amount = round(excess_l_to_bill * device.rate_per_l, 2)
-                if amount <= 0.0:
-                    amount = 0.01
-
-                new_bill = Bill(
-                    device_id=device.id,
-                    excess_l=excess_l_to_bill,
-                    amount=amount,
-                    status="unpaid",
-                    ts=datetime.now(timezone.utc)
-                )
-                db.session.add(new_bill)
-                db.session.flush() # assign new_bill.id
-
-                # Cut off relay (defaults to wait_for_ack=False in network thread)
-                publish_relay(device_name, "OFF")
-                dev_state["relay"] = "OFF"
-                dev_state["flow_lpm"] = 0.0
-
-                action = "LIMIT_BREACHED_BILL_CREATED_RELAY_OFF"
-                bill_created = new_bill.to_dict()
-                logger.warning(
-                    f"[QUOTA BREACH] Device '{device_name}' exceeded limit with unbilled excess {excess_l_to_bill:.2f}L (Total: {total_l}L). "
-                    f"Generated Bill #{new_bill.id} for ₹{amount:.2f} ({excess_l_to_bill}L excess). Relay turned OFF."
-                )
+            action = "FREE_LIMIT_EXCEEDED_BILL_CREATED"
+            bill_created = new_bill.to_dict()
+            logger.warning(
+                f"[FREE LIMIT EXCEEDED] Device '{device_name}' exceeded free tier ({device.free_limit_l}L) with unbilled excess {excess_l_to_bill:.2f}L (Total: {total_l}L). "
+                f"Generated Bill #{new_bill.id} for ₹{amount:.2f}."
+            )
         else:
-            # Unpaid bill exists, ensure relay remains OFF (defaults to wait_for_ack=False in network thread)
-            if dev_state["relay"] != "OFF":
-                publish_relay(device_name, "OFF")
-                dev_state["relay"] = "OFF"
-                dev_state["flow_lpm"] = 0.0
-            action = "UNPAID_BILL_PENDING_RELAY_OFF"
+            action = "PAID_TIER_USAGE"
+
+    # 4. Relay Cutoff Enforcement (Triggers when total_l hits monthly_limit_l)
+    if total_l >= device.monthly_limit_l:
+        if dev_state["relay"] != "OFF":
+            publish_relay(device_name, "OFF")
+            dev_state["relay"] = "OFF"
+            dev_state["flow_lpm"] = 0.0
+            logger.warning(
+                f"[MONTHLY LIMIT BREACH] Device '{device_name}' hit monthly limit {device.monthly_limit_l}L (Total: {total_l}L). Motor relay valve turned OFF."
+            )
+        action = "MONTHLY_LIMIT_BREACHED_RELAY_OFF"
 
     db.session.commit()
 
@@ -204,7 +195,9 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
         "action": action,
         "device_id": device_name,
         "total_l": total_l,
+        "free_limit_l": device.free_limit_l,
         "limit_l": device.monthly_limit_l,
+        "monthly_limit_l": device.monthly_limit_l,
         "relay": dev_state["relay"],
         "flow_lpm": dev_state["flow_lpm"],
         "bill": bill_created,
@@ -213,8 +206,9 @@ def _execute_process_reading(device_name: str, litres: float, total_l: float, fl
 
 def check_and_enforce_billing(device_obj):
     """
-    Evaluates latest reading for device against its limit.
-    If total_l >= monthly_limit_l and no unpaid bill exists, creates an unpaid bill and sets relay OFF.
+    Evaluates latest reading for device against free limit and monthly cutoff.
+    - If total_l > free_limit_l: generates bill for unbilled excess.
+    - If total_l >= monthly_limit_l: automatically turns relay OFF.
     """
     latest_reading = (
         Reading.query.filter_by(device_id=device_obj.id)
@@ -225,17 +219,16 @@ def check_and_enforce_billing(device_obj):
         return None
 
     total_l = latest_reading.total_l
-    if total_l >= device_obj.monthly_limit_l:
-        existing_unpaid = Bill.query.filter_by(device_id=device_obj.id, status="unpaid").first()
-        if not existing_unpaid:
-            all_bills = Bill.query.filter_by(device_id=device_obj.id).all()
-            already_billed_l = sum(b.excess_l for b in all_bills)
-            raw_excess = total_l - device_obj.monthly_limit_l
-            if len(all_bills) > 0 and (raw_excess - already_billed_l) > 0:
-                unbilled_excess_l = raw_excess - already_billed_l
-            else:
-                unbilled_excess_l = raw_excess
+    created_bill = None
 
+    # 1. Billing generation for excess over free limit
+    if total_l > device_obj.free_limit_l:
+        all_bills = Bill.query.filter_by(device_id=device_obj.id).all()
+        already_billed_l = sum(b.excess_l for b in all_bills)
+        raw_excess = total_l - device_obj.free_limit_l
+        unbilled_excess_l = max(0.0, raw_excess - already_billed_l)
+
+        if (len(all_bills) == 0 and unbilled_excess_l > 0) or unbilled_excess_l >= MIN_REBILL_L:
             excess_l_to_bill = round(unbilled_excess_l, 2)
             if excess_l_to_bill <= 0.0:
                 excess_l_to_bill = 0.1
@@ -252,13 +245,17 @@ def check_and_enforce_billing(device_obj):
             )
             db.session.add(new_bill)
             db.session.commit()
+            created_bill = new_bill
 
+    # 2. Relay cutoff enforcement for monthly limit
+    if total_l >= device_obj.monthly_limit_l:
+        dev_state = get_device_state(device_obj.name)
+        if dev_state["relay"] != "OFF":
             publish_relay(device_obj.name, "OFF")
-            dev_state = get_device_state(device_obj.name)
             dev_state["relay"] = "OFF"
             dev_state["flow_lpm"] = 0.0
-            return new_bill
-    return None
+
+    return created_bill
 
 
 def reset_device_litres(device_name: str) -> dict:
@@ -270,7 +267,7 @@ def reset_device_litres(device_name: str) -> dict:
     """
     device = Device.query.filter_by(name=device_name).first()
     if not device:
-        device = Device(name=device_name, monthly_limit_l=500.0, rate_per_l=0.10)
+        device = Device(name=device_name, free_limit_l=500.0, monthly_limit_l=1000.0, rate_per_l=0.10)
         db.session.add(device)
 
     # Insert fresh 0.0L cycle start reading

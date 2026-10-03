@@ -24,7 +24,8 @@ def test_get_usage_structure_and_values(client, app):
 
     assert data["device"] == "device1"
     assert data["total"] == 132.5
-    assert data["limit"] == 500.0
+    assert data["free_limit"] == 500.0
+    assert data["limit"] == 1000.0
     assert data["flow_lpm"] == 2.4
     assert data["relay"] == "ON"
     assert data["online"] is True
@@ -257,8 +258,8 @@ def test_verify_payment_success_marks_paid_and_turns_relay_on(mock_razorpay_clie
     mock_razorpay_client.return_value = mock_instance
 
     with app.app_context():
-        # Trigger bill and turn relay OFF
-        process_reading("device1", litres=20.0, total_l=520.0, flow_lpm=2.4)
+        # Trigger bill and turn relay OFF by exceeding monthly limit (1000L)
+        process_reading("device1", litres=20.0, total_l=1020.0, flow_lpm=2.4)
         assert get_device_state("device1")["relay"] == "OFF"
 
         device = Device.query.filter_by(name="device1").first()
@@ -291,20 +292,23 @@ def test_verify_payment_success_marks_paid_and_turns_relay_on(mock_razorpay_clie
 
 
 def test_update_device_quota_success(client, app):
-    """POST /api/device/<device>/quota updates limit and rate in DB."""
+    """POST /api/device/<device>/quota updates free limit, monthly limit and rate in DB."""
     res = client.post("/api/device/device1/quota", json={
+        "free_limit_l": 600.0,
         "monthly_limit_l": 1200.0,
         "rate_per_l": 0.25
     })
     assert res.status_code == 200
     data = res.get_json()
     assert data["success"] is True
+    assert data["free_limit_l"] == 600.0
     assert data["monthly_limit_l"] == 1200.0
     assert data["rate_per_l"] == 0.25
 
-    # Verify subsequent GET /api/usage/device1 reflects new limit
+    # Verify subsequent GET /api/usage/device1 reflects new limits
     usage_res = client.get("/api/usage/device1")
     assert usage_res.status_code == 200
+    assert usage_res.get_json()["free_limit"] == 600.0
     assert usage_res.get_json()["limit"] == 1200.0
 
 

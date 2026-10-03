@@ -11,7 +11,8 @@ class Device(db.Model):
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     name = db.Column(db.String(128), unique=True, nullable=False)
-    monthly_limit_l = db.Column(db.Float, nullable=False, default=500.0)
+    free_limit_l = db.Column(db.Float, nullable=False, default=500.0)
+    monthly_limit_l = db.Column(db.Float, nullable=False, default=1000.0)
     rate_per_l = db.Column(db.Float, nullable=False, default=0.10)
 
     # Relationships
@@ -22,6 +23,7 @@ class Device(db.Model):
         return {
             "id": self.id,
             "name": self.name,
+            "free_limit_l": self.free_limit_l,
             "monthly_limit_l": self.monthly_limit_l,
             "rate_per_l": self.rate_per_l,
         }

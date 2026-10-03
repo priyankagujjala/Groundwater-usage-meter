@@ -22,18 +22,20 @@
     USE_MOCK: true,
     DEVICE_ID: 'device1',
     POLL_INTERVAL_MS: 5000,
-    DEFAULT_MONTHLY_LIMIT_L: 500,
+    DEFAULT_FREE_LIMIT_L: 500,
+    DEFAULT_MONTHLY_LIMIT_L: 1000,
     DEFAULT_RATE_PER_L: 0.10,
   };
 
   const state = {
     deviceId: config.DEVICE_ID,
-    totalUsageLitres: 460.0, // starts near threshold for realistic demo progression
-    monthlyLimitLitres: config.DEFAULT_MONTHLY_LIMIT_L,
+    totalUsageLitres: 460.0, // starts in free zone for realistic demo progression
+    freeLimitLitres: config.DEFAULT_FREE_LIMIT_L || 500,
+    monthlyLimitLitres: config.DEFAULT_MONTHLY_LIMIT_L || 1000,
     flowRateLpm: 2.4,
     relayState: 'ON', // 'ON' | 'OFF'
     deviceStatus: 'online', // 'online' | 'offline'
-    ratePerLitre: config.DEFAULT_RATE_PER_L,
+    ratePerLitre: config.DEFAULT_RATE_PER_L || 0.10,
     readingsHistory: [],
     bills: [],
     pollTimer: null,
@@ -102,13 +104,13 @@
         state.flowRateLpm = 0.0;
       }
 
-      // Check limit threshold breach whenever total >= limit
-      if (state.totalUsageLitres >= state.monthlyLimitLitres) {
-        const excessTotal = +(state.totalUsageLitres - state.monthlyLimitLitres).toFixed(2);
+      // 1. Bill generation triggers for usage exceeding freeLimitLitres
+      if (state.totalUsageLitres > state.freeLimitLitres) {
+        const excessTotal = +(state.totalUsageLitres - state.freeLimitLitres).toFixed(2);
         const previouslyBilled = state.bills.reduce((sum, b) => sum + Number(b.excess_l || 0), 0);
         const unbilledExcess = +(excessTotal - previouslyBilled).toFixed(2);
 
-        // Generate bill on quota breach and for every 1.0 L excess accumulated after
+        // Generate bill on crossing free limit and for every 1.0 L excess accumulated after
         if (state.bills.length === 0 || unbilledExcess >= 1.0) {
           const excessToBill = unbilledExcess >= 1.0 ? unbilledExcess : (excessTotal > 0 ? excessTotal : 0.1);
           const amount = +(excessToBill * state.ratePerLitre).toFixed(2);
@@ -121,10 +123,13 @@
             status: 'unpaid',
             ts: new Date().toISOString(),
           });
-          // Automatic valve cutoff
-          state.relayState = 'OFF';
-          state.flowRateLpm = 0.0;
         }
+      }
+
+      // 2. Automatic valve cutoff triggers ONLY when monthlyLimitLitres is hit
+      if (state.totalUsageLitres >= state.monthlyLimitLitres) {
+        state.relayState = 'OFF';
+        state.flowRateLpm = 0.0;
       }
     },
 
@@ -134,6 +139,8 @@
         device: state.deviceId,
         total: state.totalUsageLitres,
         total_l: state.totalUsageLitres,
+        free_limit: state.freeLimitLitres,
+        free_limit_l: state.freeLimitLitres,
         limit: state.monthlyLimitLitres,
         monthly_limit_l: state.monthlyLimitLitres,
         flow_lpm: state.flowRateLpm,
@@ -317,17 +324,22 @@
     },
 
     /**
-     * POST /api/device/<device>/quota with body {"monthly_limit_l": <num>, "rate_per_l": <num>}
+     * POST /api/device/<device>/quota with body {"free_limit_l": <num>, "monthly_limit_l": <num>, "rate_per_l": <num>}
      */
-    async updateQuota(deviceId, limit, rate) {
+    async updateQuota(deviceId, freeLimit, monthlyLimit, rate) {
       if (config.USE_MOCK) {
-        state.monthlyLimitLitres = Number(limit);
+        state.freeLimitLitres = Number(freeLimit);
+        state.monthlyLimitLitres = Number(monthlyLimit);
         state.ratePerLitre = Number(rate);
-        return { success: true, monthly_limit_l: limit, rate_per_l: rate };
+        return { success: true, free_limit_l: freeLimit, monthly_limit_l: monthlyLimit, rate_per_l: rate };
       }
       return await this.request(`/api/device/${encodeURIComponent(deviceId)}/quota`, {
         method: 'POST',
-        body: JSON.stringify({ monthly_limit_l: Number(limit), rate_per_l: Number(rate) }),
+        body: JSON.stringify({
+          free_limit_l: Number(freeLimit),
+          monthly_limit_l: Number(monthlyLimit),
+          rate_per_l: Number(rate),
+        }),
       });
     },
 
@@ -519,11 +531,12 @@
   function normalizeUsageData(raw) {
     return {
       total: raw.total ?? raw.total_l ?? raw.litres_total ?? state.totalUsageLitres,
-      limit: raw.limit ?? raw.monthly_limit_l ?? raw.limit_l ?? config.DEFAULT_MONTHLY_LIMIT_L,
+      free_limit: raw.free_limit ?? raw.free_limit_l ?? config.DEFAULT_FREE_LIMIT_L ?? 500,
+      limit: raw.limit ?? raw.monthly_limit_l ?? raw.limit_l ?? config.DEFAULT_MONTHLY_LIMIT_L ?? 1000,
       flow_lpm: raw.flow_lpm ?? raw.flow_rate ?? raw.flowRate ?? 0.0,
       relay: (raw.relay ?? raw.relay_state ?? raw.relay_status ?? 'ON').toUpperCase(),
       status: raw.status ?? raw.device_status ?? 'online',
-      rate_per_l: raw.rate_per_l ?? raw.rate ?? config.DEFAULT_RATE_PER_L,
+      rate_per_l: raw.rate_per_l ?? raw.rate ?? config.DEFAULT_RATE_PER_L ?? 0.10,
     };
   }
 
@@ -685,6 +698,7 @@
     elements: {
       gaugeCircle: document.getElementById('gauge-progress-circle'),
       gaugeUsedText: document.getElementById('gauge-used-litres'),
+      gaugeFreeLimitText: document.getElementById('gauge-free-litres'),
       gaugeLimitText: document.getElementById('gauge-limit-litres'),
       gaugePercentBadge: document.getElementById('gauge-percent-badge'),
       gaugeCard: document.getElementById('card-gauge'),
@@ -708,6 +722,7 @@
       deviceStatusText: document.getElementById('device-status-text'),
       mockBadge: document.getElementById('mock-badge'),
 
+      policyFreeLimit: document.getElementById('policy-free-limit'),
       policyQuota: document.getElementById('policy-quota'),
       policyRate: document.getElementById('policy-rate'),
       policyExcessLitres: document.getElementById('policy-excess-litres'),
@@ -751,6 +766,7 @@
       btnCancelQuota: document.getElementById('btn-cancel-quota'),
       formUpdateQuota: document.getElementById('form-update-quota'),
       inputQuotaDevice: document.getElementById('input-quota-device'),
+      inputQuotaFreeLimit: document.getElementById('input-quota-free-limit'),
       inputQuotaLimit: document.getElementById('input-quota-limit'),
       inputQuotaRate: document.getElementById('input-quota-rate'),
 
@@ -816,10 +832,13 @@
     },
 
     renderUsage(data, hasUnpaidBills = false) {
-      const used = Number(data.total).toFixed(1);
-      const limit = Number(data.limit);
-      const percent = Math.min(Math.round((used / limit) * 100), 100);
-      const isOverLimit = used >= limit;
+      const usedNum = Number(data.total);
+      const used = usedNum.toFixed(1);
+      const freeLimit = Number(data.free_limit ?? state.freeLimitLitres ?? 500);
+      const monthlyLimit = Number(data.limit ?? state.monthlyLimitLitres ?? 1000);
+      const isOverFreeLimit = usedNum > freeLimit;
+      const isOverMonthlyLimit = usedNum >= monthlyLimit;
+      const percent = Math.min(Math.round((usedNum / monthlyLimit) * 100), 100);
       const isUser = (state.currentUser.role || 'user') === 'user';
       const monthInfo = getCurrentMonthInfo();
 
@@ -829,23 +848,25 @@
 
       // Update Gauge Number & Texts
       this.elements.gaugeUsedText.textContent = used;
-      this.elements.gaugeLimitText.textContent = limit;
+      if (this.elements.gaugeFreeLimitText) this.elements.gaugeFreeLimitText.textContent = freeLimit;
+      if (this.elements.gaugeLimitText) this.elements.gaugeLimitText.textContent = monthlyLimit;
       this.elements.gaugePercentBadge.textContent = `${percent}%`;
 
       // Circumference = 2 * PI * 90 = 565.487
       const circumference = 565.487;
-      const progressPercent = Math.min(used / limit, 1.0);
+      const progressPercent = Math.min(usedNum / monthlyLimit, 1.0);
       const offset = circumference - (progressPercent * circumference);
       this.elements.gaugeCircle.style.strokeDashoffset = offset;
 
       // Quota policy summary
-      this.elements.policyQuota.textContent = `${limit} Litres`;
-      this.elements.policyRate.textContent = `₹${Number(data.rate_per_l).toFixed(2)} / Litre`;
+      if (this.elements.policyFreeLimit) this.elements.policyFreeLimit.textContent = `${freeLimit} Litres`;
+      if (this.elements.policyQuota) this.elements.policyQuota.textContent = `${monthlyLimit} Litres`;
+      if (this.elements.policyRate) this.elements.policyRate.textContent = `₹${Number(data.rate_per_l).toFixed(2)} / Litre`;
 
-      const excess = Math.max(0, used - limit);
+      const excess = Math.max(0, usedNum - freeLimit);
       const excessAmount = excess * data.rate_per_l;
-      this.elements.policyExcessLitres.textContent = `${excess.toFixed(1)} L`;
-      this.elements.policyExcessAmount.textContent = `₹${excessAmount.toFixed(2)}`;
+      if (this.elements.policyExcessLitres) this.elements.policyExcessLitres.textContent = `${excess.toFixed(1)} L`;
+      if (this.elements.policyExcessAmount) this.elements.policyExcessAmount.textContent = `₹${excessAmount.toFixed(2)}`;
 
       // Update Quick Pay Button in Card
       const unpaidBill = (state.bills || []).find(b => (b.status || '').toLowerCase() === 'unpaid');
@@ -862,23 +883,33 @@
         }
       }
 
-      // Requirement 2: If user has crossed the limit in that month, gauge is SOLID RED till the month is over
-      // Requirement 3: Gauge resets to 0 and turns GREEN when new month starts
-      if (isOverLimit) {
+      // Visual Requirements:
+      // 1. 0 to free_limit: Gauge is GREEN.
+      // 2. free_limit to monthly_limit: Gauge turns RED, bill starts generating for every litre after free limit is crossed, relay stays ON.
+      // 3. >= monthly_limit: Gauge is RED, relay automatically turns OFF.
+      if (isOverMonthlyLimit) {
         this.elements.gaugeCard.classList.add('gauge-danger');
         this.elements.gaugeCircle.style.stroke = 'var(--gauge-danger)';
         this.elements.gaugePercentBadge.style.background = 'var(--danger-bg)';
         this.elements.gaugePercentBadge.style.color = 'var(--danger)';
         this.elements.gaugePercentBadge.style.borderColor = 'var(--danger-border)';
-        this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--danger);"><i class="fa-solid fa-triangle-exclamation"></i> Limit Breached (+${excess.toFixed(1)} L) — Locked RED for ${monthInfo.monthName}</strong>`;
-        this.showAlert(`Monthly groundwater limit of ${limit}L exceeded for ${monthInfo.monthName}! Motor valve shut off. Gauge remains RED until the month is over or Admin resets the month.`, 'danger');
+        this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--danger);"><i class="fa-solid fa-triangle-exclamation"></i> Monthly Limit Breached (${used} / ${monthlyLimit} L) — Motor Valve Cut OFF</strong>`;
+        this.showAlert(`Monthly groundwater limit of ${monthlyLimit}L reached for ${monthInfo.monthName}! Motor valve shut off automatically.`, 'danger');
+      } else if (isOverFreeLimit) {
+        this.elements.gaugeCard.classList.add('gauge-danger');
+        this.elements.gaugeCircle.style.stroke = 'var(--gauge-danger)';
+        this.elements.gaugePercentBadge.style.background = 'var(--danger-bg)';
+        this.elements.gaugePercentBadge.style.color = 'var(--danger)';
+        this.elements.gaugePercentBadge.style.borderColor = 'var(--danger-border)';
+        this.elements.gaugeDesc.innerHTML = `<strong style="color: var(--danger);"><i class="fa-solid fa-fire"></i> Free Limit Crossed (+${excess.toFixed(1)} L excess billed) — Valve ON until ${monthlyLimit} L</strong>`;
+        this.showAlert(`Free limit of ${freeLimit}L crossed! Billing at ₹${Number(data.rate_per_l).toFixed(2)}/L is active. Relay will cut off at ${monthlyLimit}L.`, 'warning');
       } else {
         this.elements.gaugeCard.classList.remove('gauge-danger');
         this.elements.gaugeCircle.style.stroke = 'var(--gauge-safe)';
         this.elements.gaugePercentBadge.style.background = 'var(--success-bg)';
         this.elements.gaugePercentBadge.style.color = 'var(--success)';
         this.elements.gaugePercentBadge.style.borderColor = 'var(--success-border)';
-        this.elements.gaugeDesc.innerHTML = `<span style="color: var(--success);"><i class="fa-solid fa-circle-check"></i> Standard Monthly Allowance (${(limit - used).toFixed(1)} L remaining in ${monthInfo.monthName})</span>`;
+        this.elements.gaugeDesc.innerHTML = `<span style="color: var(--success);"><i class="fa-solid fa-circle-check"></i> Free Water Tier (${(freeLimit - usedNum).toFixed(1)} L remaining in free allowance)</span>`;
       }
     },
 
@@ -1341,6 +1372,7 @@
     // Admin Quota Modal Open
     if (UI.elements.btnOpenQuotaModal) {
       UI.elements.btnOpenQuotaModal.addEventListener('click', () => {
+        if (UI.elements.inputQuotaFreeLimit) UI.elements.inputQuotaFreeLimit.value = state.freeLimitLitres;
         if (UI.elements.inputQuotaLimit) UI.elements.inputQuotaLimit.value = state.monthlyLimitLitres;
         if (UI.elements.inputQuotaRate) UI.elements.inputQuotaRate.value = state.ratePerLitre;
         if (UI.elements.inputQuotaDevice) UI.elements.inputQuotaDevice.value = state.deviceId;
@@ -1364,9 +1396,14 @@
     if (UI.elements.formUpdateQuota) {
       UI.elements.formUpdateQuota.addEventListener('submit', async (e) => {
         e.preventDefault();
+        const freeLimitVal = parseFloat(UI.elements.inputQuotaFreeLimit ? UI.elements.inputQuotaFreeLimit.value : state.freeLimitLitres);
         const limitVal = parseFloat(UI.elements.inputQuotaLimit.value);
         const rateVal = parseFloat(UI.elements.inputQuotaRate.value);
 
+        if (isNaN(freeLimitVal) || freeLimitVal < 0) {
+          UI.showAlert('Free limit must be 0 or a positive number.', 'warning');
+          return;
+        }
         if (isNaN(limitVal) || limitVal <= 0) {
           UI.showAlert('Monthly limit must be a positive number.', 'warning');
           return;
@@ -1377,14 +1414,15 @@
         }
 
         try {
-          await ApiClient.updateQuota(state.deviceId, limitVal, rateVal);
+          await ApiClient.updateQuota(state.deviceId, freeLimitVal, limitVal, rateVal);
+          state.freeLimitLitres = freeLimitVal;
           state.monthlyLimitLitres = limitVal;
           state.ratePerLitre = rateVal;
           if (UI.elements.quotaModalOverlay) UI.elements.quotaModalOverlay.style.display = 'none';
-          UI.showAlert(`Quota policy updated: Limit ${limitVal}L, Rate ₹${rateVal}/L`, 'success');
+          UI.showAlert(`Limits updated: Free ${freeLimitVal}L, Monthly Cutoff ${limitVal}L, Rate ₹${rateVal}/L`, 'success');
           await pollData();
         } catch (err) {
-          UI.showAlert(`Failed to update quota: ${err.message}`, 'danger');
+          UI.showAlert(`Failed to update limits: ${err.message}`, 'danger');
         }
       });
     }
@@ -1454,21 +1492,32 @@
       });
     }
 
-    // Mock Mode Toolbar: Add +30 L
+    // Mock Mode Toolbar: Add +50 L
     const btnAddFlow = document.getElementById('mock-btn-add-flow');
     if (btnAddFlow) {
       btnAddFlow.addEventListener('click', () => {
-        state.totalUsageLitres += 30.0;
+        state.totalUsageLitres += 50.0;
         MockEngine.stepSimulation();
         pollData();
       });
     }
 
-    // Mock Mode Toolbar: Trigger Limit Breach (>500L)
+    // Mock Mode Toolbar: Cross Free Limit (>500L) -> Gauge turns RED, billing starts, valve stays ON
+    const btnTriggerFreeBreach = document.getElementById('mock-btn-trigger-free-breach');
+    if (btnTriggerFreeBreach) {
+      btnTriggerFreeBreach.addEventListener('click', () => {
+        state.totalUsageLitres = Math.max(state.freeLimitLitres + 15.0, 515.0);
+        state.relayState = 'ON';
+        MockEngine.stepSimulation();
+        pollData();
+      });
+    }
+
+    // Mock Mode Toolbar: Hit Monthly Limit (>=1000L) -> Valve cuts OFF automatically
     const btnTriggerBreach = document.getElementById('mock-btn-trigger-breach');
     if (btnTriggerBreach) {
       btnTriggerBreach.addEventListener('click', () => {
-        state.totalUsageLitres = Math.max(state.monthlyLimitLitres + 2.5, 502.5);
+        state.totalUsageLitres = Math.max(state.monthlyLimitLitres + 5.0, 1005.0);
         state.relayState = 'OFF';
         state.flowRateLpm = 0.0;
         MockEngine.stepSimulation();
@@ -1490,7 +1539,8 @@
     const btnReset = document.getElementById('mock-btn-reset');
     if (btnReset) {
       btnReset.addEventListener('click', () => {
-        state.totalUsageLitres = 460.0;
+        state.totalUsageLitres = 0.0;
+        state.freeLimitLitres = config.DEFAULT_FREE_LIMIT_L;
         state.monthlyLimitLitres = config.DEFAULT_MONTHLY_LIMIT_L;
         state.flowRateLpm = 2.4;
         state.relayState = 'ON';

@@ -59,10 +59,11 @@ def _seed_initial_data():
     """Seed default device1 if not present in database."""
     device1 = Device.query.filter_by(name="device1").first()
     if not device1:
-        logger.info("Seeding default device 'device1' with limit 500L and rate Rs 0.10/L.")
+        logger.info("Seeding default device 'device1' with free limit 500L, monthly cutoff 1000L and rate Rs 0.10/L.")
         device1 = Device(
             name="device1",
-            monthly_limit_l=500.0,
+            free_limit_l=500.0,
+            monthly_limit_l=1000.0,
             rate_per_l=0.10,
         )
         db.session.add(device1)

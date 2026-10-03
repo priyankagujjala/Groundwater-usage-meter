@@ -72,8 +72,8 @@ def test_billing_process_reading_off_never_waits(app):
     """
     with app.app_context():
         with patch("backend.billing.publish_relay") as mock_publish:
-            res = process_reading("device1", litres=20.0, total_l=520.0, flow_lpm=2.4)
-            assert res["action"] == "LIMIT_BREACHED_BILL_CREATED_RELAY_OFF"
+            res = process_reading("device1", litres=20.0, total_l=1020.0, flow_lpm=2.4)
+            assert res["action"] == "MONTHLY_LIMIT_BREACHED_RELAY_OFF"
             assert res["relay"] == "OFF"
 
             # Check that publish_relay was called once for OFF

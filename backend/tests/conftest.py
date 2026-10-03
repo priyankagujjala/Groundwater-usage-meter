@@ -15,7 +15,7 @@ def app():
         db.create_all()
         # Seed test device1
         if not Device.query.filter_by(name="device1").first():
-            db.session.add(Device(name="device1", monthly_limit_l=500.0, rate_per_l=0.10))
+            db.session.add(Device(name="device1", free_limit_l=500.0, monthly_limit_l=1000.0, rate_per_l=0.10))
             db.session.commit()
 
         yield app

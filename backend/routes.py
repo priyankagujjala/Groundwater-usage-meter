@@ -28,7 +28,7 @@ def get_usage(device):
     device_obj = Device.query.filter_by(name=device).first()
     if not device_obj:
         # Create default device entity if not found
-        device_obj = Device(name=device, monthly_limit_l=500.0, rate_per_l=0.10)
+        device_obj = Device(name=device, free_limit_l=500.0, monthly_limit_l=1000.0, rate_per_l=0.10)
         db.session.add(device_obj)
         db.session.commit()
 
@@ -50,7 +50,11 @@ def get_usage(device):
     return jsonify({
         "device": device,
         "total": round(total_l, 2),
+        "free_limit": round(device_obj.free_limit_l, 2),
+        "free_limit_l": round(device_obj.free_limit_l, 2),
         "limit": round(device_obj.monthly_limit_l, 2),
+        "monthly_limit_l": round(device_obj.monthly_limit_l, 2),
+        "rate_per_l": round(device_obj.rate_per_l, 4),
         "flow_lpm": round(dev_state["flow_lpm"], 2),
         "relay": dev_state["relay"],
         "online": online,
@@ -107,7 +111,7 @@ def toggle_relay(device):
     # Ensure device exists in DB
     device_obj = Device.query.filter_by(name=device).first()
     if not device_obj:
-        device_obj = Device(name=device, monthly_limit_l=500.0, rate_per_l=0.10)
+        device_obj = Device(name=device, free_limit_l=500.0, monthly_limit_l=1000.0, rate_per_l=0.10)
         db.session.add(device_obj)
         db.session.commit()
 
@@ -372,8 +376,8 @@ def verify_payment():
 def update_device_quota(device):
     """
     POST/PUT /api/device/<device>/quota
-    Body: {"monthly_limit_l": 1000.0, "rate_per_l": 0.20} (or {"limit": 1000, "rate": 0.20})
-    Updates monthly quota threshold and tariff rate for a device.
+    Body: {"free_limit_l": 500.0, "monthly_limit_l": 1000.0, "rate_per_l": 0.20}
+    Updates free allowance threshold, monthly cutoff quota threshold, and tariff rate for a device.
     """
     data = request.get_json(silent=True)
     if not data:
@@ -381,8 +385,18 @@ def update_device_quota(device):
 
     device_obj = Device.query.filter_by(name=device).first()
     if not device_obj:
-        device_obj = Device(name=device, monthly_limit_l=500.0, rate_per_l=0.10)
+        device_obj = Device(name=device, free_limit_l=500.0, monthly_limit_l=1000.0, rate_per_l=0.10)
         db.session.add(device_obj)
+
+    if "free_limit_l" in data or "free_limit" in data:
+        val = data.get("free_limit_l", data.get("free_limit"))
+        try:
+            free_val = float(val)
+            if free_val < 0:
+                return jsonify({"error": "'free_limit_l' cannot be negative."}), 400
+            device_obj.free_limit_l = free_val
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid 'free_limit_l' format. Must be a numeric value."}), 400
 
     if "monthly_limit_l" in data or "limit" in data:
         val = data.get("monthly_limit_l", data.get("limit"))
@@ -409,8 +423,9 @@ def update_device_quota(device):
 
     return jsonify({
         "success": True,
-        "message": f"Quota and tariff updated for '{device}'.",
+        "message": f"Quota and tariff policy updated for '{device}'.",
         "device": device,
+        "free_limit_l": round(device_obj.free_limit_l, 2),
         "monthly_limit_l": round(device_obj.monthly_limit_l, 2),
         "rate_per_l": round(device_obj.rate_per_l, 4),
     }), 200

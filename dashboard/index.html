@@ -116,13 +116,13 @@
           <div class="gauge-center-content">
             <span class="gauge-used-val" id="gauge-used-litres">0.0</span>
             <span class="gauge-unit">Litres Used</span>
-            <span class="gauge-limit-subtext">Monthly Limit: <strong id="gauge-limit-litres">500</strong> L</span>
+            <span class="gauge-limit-subtext">Free: <strong id="gauge-free-litres">500</strong> L &bull; Cutoff: <strong id="gauge-limit-litres">1000</strong> L</span>
           </div>
         </div>
 
         <div class="gauge-footer">
           <span style="font-size: 0.8rem; color: var(--text-muted);" id="gauge-status-desc">
-            Consumption within standard allowance
+            Consumption within free allowance (Gauge is Green)
           </span>
           <span id="month-days-left-text" style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
             <i class="fa-regular fa-clock"></i> <span id="days-remaining-val">--</span> days remaining in this month
@@ -171,7 +171,7 @@
           </div>
 
           <p class="relay-desc" id="relay-desc">
-            Motor valve is active. Water extraction permitted under monthly quota.
+            Motor valve is active. Extraction allowed up to monthly cutoff limit.
           </p>
 
           <!-- Admin Relay Manual Toggle Action -->
@@ -220,15 +220,19 @@
 
         <div class="info-list">
           <div class="info-row">
-            <span class="info-label"><i class="fa-solid fa-shield-halved"></i> Monthly Quota</span>
-            <span class="info-val" id="policy-quota">500 Litres</span>
+            <span class="info-label"><i class="fa-solid fa-leaf"></i> Free Allowance</span>
+            <span class="info-val" id="policy-free-limit" style="color: var(--success);">500 Litres</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label"><i class="fa-solid fa-shield-halved"></i> Monthly Cutoff</span>
+            <span class="info-val" id="policy-quota">1000 Litres</span>
           </div>
           <div class="info-row">
             <span class="info-label"><i class="fa-solid fa-coins"></i> Excess Tariff</span>
             <span class="info-val" id="policy-rate">₹0.10 / Litre</span>
           </div>
           <div class="info-row">
-            <span class="info-label"><i class="fa-solid fa-triangle-exclamation"></i> Excess Consumed</span>
+            <span class="info-label"><i class="fa-solid fa-triangle-exclamation"></i> Paid Excess</span>
             <span class="info-val" id="policy-excess-litres" style="color: var(--warning);">0.0 L</span>
           </div>
           <div class="info-row">
@@ -288,11 +292,14 @@
         <button class="btn-mock" id="mock-btn-add-15" title="Simulate drawing 15L of water">
           <i class="fa-solid fa-plus"></i> Add +15 L
         </button>
-        <button class="btn-mock" id="mock-btn-add-flow" title="Simulate drawing 30L of water">
-          <i class="fa-solid fa-plus"></i> Add +30 L
+        <button class="btn-mock" id="mock-btn-add-flow" title="Simulate drawing 50L of water">
+          <i class="fa-solid fa-plus"></i> Add +50 L
         </button>
-        <button class="btn-mock" id="mock-btn-trigger-breach" title="Cross 500L threshold immediately">
-          <i class="fa-solid fa-radiation"></i> Trigger Limit Breach (>500L)
+        <button class="btn-mock" id="mock-btn-trigger-free-breach" title="Cross 500L Free Limit (Turns RED, billing starts, valve stays ON)">
+          <i class="fa-solid fa-fire"></i> Cross Free Limit (>500L)
+        </button>
+        <button class="btn-mock" id="mock-btn-trigger-breach" title="Hit 1000L Monthly Cutoff (Valve shuts OFF automatically)">
+          <i class="fa-solid fa-radiation"></i> Hit Monthly Limit (≥1000L)
         </button>
         <button class="btn-mock" id="mock-btn-toggle-network" title="Simulate backend network drop">
           <i class="fa-solid fa-network-wired"></i> Toggle Network Failure
@@ -381,7 +388,7 @@
   <div class="modal-overlay" id="quota-modal-overlay" style="display: none;">
     <div class="modal-card">
       <div class="modal-header">
-        <h3 class="modal-title"><i class="fa-solid fa-sliders"></i> Update Quota & Tariff Policy</h3>
+        <h3 class="modal-title"><i class="fa-solid fa-sliders"></i> Admin Limits & Tariff Configuration</h3>
         <button class="btn-icon" id="btn-close-quota-modal" type="button"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <form id="form-update-quota" class="modal-form">
@@ -389,17 +396,39 @@
           <label class="form-label" for="input-quota-device">Target Device</label>
           <input type="text" id="input-quota-device" class="form-input" value="device1" readonly>
         </div>
+        <!-- Option 1: Free Litres Limit -->
         <div class="form-group">
-          <label class="form-label" for="input-quota-limit">Monthly Limit (Litres)</label>
-          <input type="number" id="input-quota-limit" class="form-input" min="0.1" step="any" placeholder="e.g. 500" required>
+          <label class="form-label" for="input-quota-free-limit">
+            <i class="fa-solid fa-leaf" style="color: var(--success);"></i> Option 1: Free Litres Limit (Green Zone)
+          </label>
+          <input type="number" id="input-quota-free-limit" class="form-input" min="0" step="any" placeholder="e.g. 500" required>
+          <small style="color: var(--text-muted); font-size: 0.75rem; display: block; margin-top: 4px;">
+            Water usage within this limit is free and the gauge displays <strong>Green</strong>.
+          </small>
         </div>
+        <!-- Option 2: Monthly Water Usage Limit -->
         <div class="form-group">
-          <label class="form-label" for="input-quota-rate">Excess Rate (₹ / Litre)</label>
+          <label class="form-label" for="input-quota-limit">
+            <i class="fa-solid fa-shield-halved" style="color: var(--danger);"></i> Option 2: Monthly Water Usage Limit (Cutoff)
+          </label>
+          <input type="number" id="input-quota-limit" class="form-input" min="0.1" step="any" placeholder="e.g. 1000" required>
+          <small style="color: var(--text-muted); font-size: 0.75rem; display: block; margin-top: 4px;">
+            Once reached, the motor valve <strong>automatically turns OFF</strong>. Gauge remains <strong>Red</strong>.
+          </small>
+        </div>
+        <!-- Tariff Rate -->
+        <div class="form-group">
+          <label class="form-label" for="input-quota-rate">
+            <i class="fa-solid fa-coins" style="color: var(--accent-cyan);"></i> Excess Tariff Rate (₹ / Litre)
+          </label>
           <input type="number" id="input-quota-rate" class="form-input" min="0" step="any" placeholder="e.g. 0.10" required>
+          <small style="color: var(--text-muted); font-size: 0.75rem; display: block; margin-top: 4px;">
+            Bills start generating for every litre consumed after the free limit is crossed.
+          </small>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn-secondary" id="btn-cancel-quota">Cancel</button>
-          <button type="submit" class="btn-primary" id="btn-save-quota"><i class="fa-solid fa-check"></i> Save Policy</button>
+          <button type="submit" class="btn-primary" id="btn-save-quota"><i class="fa-solid fa-check"></i> Save Limits</button>
         </div>
       </form>
     </div>

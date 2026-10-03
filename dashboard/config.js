@@ -16,8 +16,9 @@ const CONFIG = {
   POLL_INTERVAL_MS: 5000,
 
   // Fallback defaults if not supplied by API
-  DEFAULT_MONTHLY_LIMIT_L: 500,
-  DEFAULT_RATE_PER_L: 0.10, // Rs 0.10 per litre excess
+  DEFAULT_FREE_LIMIT_L: 500, // 0 to 500L is free (Gauge is Green)
+  DEFAULT_MONTHLY_LIMIT_L: 1000, // 1000L is hard cutoff (Relay turns OFF)
+  DEFAULT_RATE_PER_L: 0.10, // Rs 0.10 per litre after free limit is crossed
 
   // Direct MQTT WebSockets Bridge (Enables instantaneous <30ms hardware switching directly from browser)
   MQTT_WS_ENABLED: true,
