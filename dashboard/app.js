@@ -178,10 +178,12 @@
     },
 
     createOrder(billId) {
+      const bill = (state.bills || []).find(b => String(b.id) === String(billId));
+      const amountPaise = bill ? Math.round(Number(bill.amount) * 100) : 100;
       return {
         success: true,
         order_id: `order_mock_${Date.now()}`,
-        amount: 100,
+        amount: amountPaise,
         currency: 'INR',
         key_id: 'rzp_test_mock',
         bill_id: billId
@@ -932,12 +934,16 @@
       // Update Quick Pay Button in Card
       const unpaidBill = (state.bills || []).find(b => (b.status || '').toLowerCase() === 'unpaid');
       if (this.elements.cardPayActionContainer) {
-        if (isUser && (hasUnpaidBills || unpaidBill)) {
+        if (hasUnpaidBills || unpaidBill || excessAmount > 0) {
           this.elements.cardPayActionContainer.style.display = 'block';
           const dueAmt = unpaidBill ? Number(unpaidBill.amount) : excessAmount;
           if (this.elements.quickPayAmount) this.elements.quickPayAmount.textContent = `₹${dueAmt.toFixed(2)}`;
-          if (this.elements.btnQuickPayCard && unpaidBill) {
-            this.elements.btnQuickPayCard.setAttribute('data-bill-id', unpaidBill.id);
+          if (this.elements.btnQuickPayCard) {
+            if (unpaidBill) {
+              this.elements.btnQuickPayCard.setAttribute('data-bill-id', unpaidBill.id);
+            } else {
+              this.elements.btnQuickPayCard.removeAttribute('data-bill-id');
+            }
           }
         } else {
           this.elements.cardPayActionContainer.style.display = 'none';
@@ -1054,21 +1060,13 @@
         });
 
         let actionHtml = '';
-        if (isAdmin) {
-          // Admin audit view: shows payment verification and transaction reference (no Pay button)
-          if (isPaid) {
-            const refText = b.payment_id ? `Ref: ${b.payment_id}` : 'Verified & Cleared';
-            actionHtml = `<span class="paid-badge"><i class="fa-solid fa-circle-check"></i> Paid</span> <span class="payment-ref">${refText}</span>`;
-          } else {
-            actionHtml = `<span class="status-badge status-unpaid"><i class="fa-solid fa-clock"></i> Unpaid (Pending)</span>`;
-          }
+        if (isPaid) {
+          const refText = b.payment_id ? `Ref: ${b.payment_id}` : 'Verified & Cleared';
+          actionHtml = `<span class="paid-badge"><i class="fa-solid fa-circle-check"></i> Paid</span> <span class="payment-ref" style="margin-left: 4px; font-size: 0.75rem; color: var(--text-muted);">${refText}</span>`;
         } else {
-          // User consumer view: displays Pay Now checkout button for unpaid bills
-          actionHtml = isPaid
-            ? `<span class="paid-badge"><i class="fa-solid fa-circle-check"></i> Paid</span>`
-            : `<button class="btn-pay-now" data-bill-id="${b.id}" aria-label="Pay Bill #${b.id}">
-                 <i class="fa-solid fa-credit-card"></i> Pay Now (₹${Number(b.amount ?? 0).toFixed(2)})
-               </button>`;
+          actionHtml = `<button class="btn-pay-now" data-bill-id="${b.id}" aria-label="Pay Bill #${b.id}">
+               <i class="fa-solid fa-credit-card"></i> Pay Now (₹${Number(b.amount ?? 0).toFixed(2)})
+             </button>`;
         }
 
         return `
