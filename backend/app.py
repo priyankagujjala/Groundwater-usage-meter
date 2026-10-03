@@ -37,6 +37,7 @@ def create_app(config_class=Config):
     # Database Tables Creation & Initial Seeding
     with app.app_context():
         db.create_all()
+        _run_migrations(app)
         _seed_initial_data()
 
     # Start MQTT background ingestion loop once at startup (not twice under debug reloader)
@@ -53,6 +54,32 @@ def create_app(config_class=Config):
 
     _global_app = app
     return app
+
+
+def _run_migrations(app):
+    """Ensure database schema is up-to-date with all required columns across SQLite & PostgreSQL."""
+    try:
+        from sqlalchemy import text, inspect
+        engine = db.engine
+        inspector = inspect(engine)
+        table_names = inspector.get_table_names()
+        if "devices" in table_names:
+            columns = [c["name"] for c in inspector.get_columns("devices")]
+            with engine.connect() as conn:
+                if "free_limit_l" not in columns:
+                    logger.info("Migrating database: Adding missing column 'free_limit_l' to 'devices' table.")
+                    conn.execute(text("ALTER TABLE devices ADD COLUMN free_limit_l FLOAT DEFAULT 500.0;"))
+                    conn.commit()
+                if "monthly_limit_l" not in columns:
+                    logger.info("Migrating database: Adding missing column 'monthly_limit_l' to 'devices' table.")
+                    conn.execute(text("ALTER TABLE devices ADD COLUMN monthly_limit_l FLOAT DEFAULT 1000.0;"))
+                    conn.commit()
+                if "rate_per_l" not in columns:
+                    logger.info("Migrating database: Adding missing column 'rate_per_l' to 'devices' table.")
+                    conn.execute(text("ALTER TABLE devices ADD COLUMN rate_per_l FLOAT DEFAULT 0.10;"))
+                    conn.commit()
+    except Exception as e:
+        logger.warning(f"Database migration check notice: {e}")
 
 
 def _seed_initial_data():

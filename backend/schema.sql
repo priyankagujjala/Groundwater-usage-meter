@@ -7,7 +7,8 @@
 CREATE TABLE IF NOT EXISTS devices (
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,
-    monthly_limit_l NUMERIC(12,2) NOT NULL DEFAULT 500,
+    free_limit_l NUMERIC(12,2) NOT NULL DEFAULT 500,
+    monthly_limit_l NUMERIC(12,2) NOT NULL DEFAULT 1000,
     rate_per_l NUMERIC(8,4) NOT NULL DEFAULT 0.10
 );
 
