@@ -65,4 +65,5 @@ Thumbs.db
 *.pem
 *.key
 *.cer
+*.pdf
 .venv/
