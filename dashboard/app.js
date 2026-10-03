@@ -43,6 +43,7 @@
     chartInstance: null,
     theme: localStorage.getItem('aquapulse_theme') || 'dark',
     mockNetworkFail: false,
+    lastMqttTelemetryTime: 0,
     currentUser: JSON.parse(localStorage.getItem('aquapulse_user')) || { role: 'admin', username: 'Admin' },
   };
 
@@ -344,6 +345,18 @@
     },
 
     /**
+     * POST /api/telemetry
+     * Ingests live telemetry reading directly to backend database & billing evaluator
+     */
+    async ingestTelemetry(telemetryData) {
+      if (config.USE_MOCK) return { success: true };
+      return await this.request('/api/telemetry', {
+        method: 'POST',
+        body: JSON.stringify(telemetryData),
+      });
+    },
+
+    /**
      * POST /api/device/<device>/reset-litres
      * Admin method to reset monthly usage litres to 0.0 Litres and turn valve ON
      */
@@ -441,29 +454,47 @@
           try {
             const data = JSON.parse(message.payloadString);
             if (data && typeof data === 'object') {
-              if (data.flow_lpm !== undefined || data.flow !== undefined) {
-                const flow = Number(data.flow_lpm ?? data.flow);
-                state.flowRateLpm = flow;
-                UI.renderFlow(flow);
+              const flow = Number(data.flow_lpm ?? data.flow ?? 0);
+              const litres = Number(data.litres ?? 0);
+              const incomingTotal = Number(data.total_l ?? data.total ?? state.totalUsageLitres);
+
+              state.flowRateLpm = flow;
+              state.lastMqttTelemetryTime = Date.now();
+              if (incomingTotal >= state.totalUsageLitres) {
+                state.totalUsageLitres = incomingTotal;
               }
-              if (data.total_l !== undefined || data.total !== undefined) {
-                const total = Number(data.total_l ?? data.total);
-                state.totalUsageLitres = total;
-                UI.renderUsage({
-                  total: state.totalUsageLitres,
-                  free_limit: state.freeLimitLitres,
-                  limit: state.monthlyLimitLitres,
-                  rate_per_l: state.ratePerLitre,
-                  flow_lpm: state.flowRateLpm,
-                  relay: state.relayState,
-                  status: 'online'
-                });
-              }
+
+              UI.renderFlow(state.flowRateLpm);
+              UI.renderUsage({
+                total: state.totalUsageLitres,
+                free_limit: state.freeLimitLitres,
+                limit: state.monthlyLimitLitres,
+                rate_per_l: state.ratePerLitre,
+                flow_lpm: state.flowRateLpm,
+                relay: state.relayState,
+                status: 'online'
+              });
+
               if (data.relay !== undefined || data.state !== undefined) {
                 const r = String(data.relay ?? data.state).toUpperCase();
                 state.relayState = r;
                 UI.renderRelay(r);
               }
+
+              // Ingest telemetry to backend so DB readings & bills are created reliably
+              ApiClient.ingestTelemetry({
+                device: state.deviceId,
+                flow_lpm: flow,
+                litres: litres,
+                total: state.totalUsageLitres
+              }).then(() => {
+                if (state.totalUsageLitres > state.freeLimitLitres) {
+                  ApiClient.getBills(state.deviceId).then(bills => {
+                    state.bills = bills;
+                    UI.renderBills(bills);
+                  }).catch(() => {});
+                }
+              }).catch(() => {});
             }
           } catch (_) {}
         };
@@ -1210,11 +1241,17 @@
       const rawUsage = await ApiClient.getUsage(state.deviceId);
       const usage = normalizeUsageData(rawUsage);
 
-      state.totalUsageLitres = usage.total;
+      // Monotonic protection: never drop litres used backwards
+      state.totalUsageLitres = Math.max(state.totalUsageLitres, usage.total);
       state.freeLimitLitres = usage.free_limit;
       state.monthlyLimitLitres = usage.limit;
       state.ratePerLitre = usage.rate_per_l;
-      state.flowRateLpm = usage.flow_lpm;
+
+      // Only take flow rate from HTTP poll if we haven't received recent MQTT telemetry in the last 8 seconds
+      const hasRecentMqtt = (Date.now() - (state.lastMqttTelemetryTime || 0)) < 8000;
+      if (!hasRecentMqtt) {
+        state.flowRateLpm = usage.flow_lpm;
+      }
       state.relayState = usage.relay;
       state.deviceStatus = usage.status;
 
@@ -1237,8 +1274,16 @@
       const hasUnpaidBills = bills.some(b => (b.status || '').toLowerCase() === 'unpaid');
 
       // 3. Render telemetry & gauge states
-      UI.renderUsage(usage, hasUnpaidBills);
-      UI.renderFlow(usage.flow_lpm);
+      UI.renderUsage({
+        total: state.totalUsageLitres,
+        free_limit: state.freeLimitLitres,
+        limit: state.monthlyLimitLitres,
+        rate_per_l: state.ratePerLitre,
+        flow_lpm: state.flowRateLpm,
+        relay: state.relayState,
+        status: state.deviceStatus,
+      }, hasUnpaidBills);
+      UI.renderFlow(state.flowRateLpm);
       UI.renderRelay(usage.relay);
       UI.renderDeviceStatus(usage.status);
 

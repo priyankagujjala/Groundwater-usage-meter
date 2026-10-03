@@ -5,10 +5,10 @@ import razorpay
 
 try:
     from .models import db, Device, Reading, Bill
-    from .billing import get_device_state, set_device_relay, is_device_online, check_and_enforce_billing, reset_device_month
+    from .billing import get_device_state, set_device_relay, is_device_online, check_and_enforce_billing, reset_device_month, process_reading
 except ImportError:
     from models import db, Device, Reading, Bill
-    from billing import get_device_state, set_device_relay, is_device_online, check_and_enforce_billing, reset_device_month
+    from billing import get_device_state, set_device_relay, is_device_online, check_and_enforce_billing, reset_device_month, process_reading
 
 logger = logging.getLogger("routes")
 api_bp = Blueprint("api", __name__)
@@ -487,6 +487,56 @@ def force_mqtt_reconnect():
         reconnect_mqtt()
         return jsonify(get_mqtt_info()), 200
     return jsonify({"error": "MQTT module unavailable"}), 503
+
+
+@api_bp.route("/api/telemetry", methods=["POST"])
+@api_bp.route("/api/readings/ingest", methods=["POST"])
+def ingest_telemetry_http():
+    """
+    POST /api/telemetry or POST /api/readings/ingest
+    Body: {"device": "device1", "flow_lpm": 35.0, "litres": 0.5, "total": 45.0}
+    Direct HTTP ingestion endpoint to ensure readings and bills are recorded reliably.
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be valid JSON."}), 400
+
+    device_name = str(data.get("device", "device1")).strip()
+    try:
+        flow_lpm = float(data.get("flow_lpm", data.get("flow", 0.0)))
+        litres = float(data.get("litres", 0.0))
+        total_l = float(data.get("total", data.get("total_l", 0.0)))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Numeric values required for flow_lpm, litres, total."}), 400
+
+    # Ensure device exists in DB
+    device_obj = Device.query.filter_by(name=device_name).first()
+    if not device_obj:
+        device_obj = Device(name=device_name, free_limit_l=500.0, monthly_limit_l=1000.0, rate_per_l=0.10)
+        db.session.add(device_obj)
+        db.session.commit()
+
+    # Save Reading record
+    reading = Reading(
+        device_id=device_obj.id,
+        litres=round(litres, 3),
+        total_l=round(total_l, 3),
+        ts=datetime.now(timezone.utc)
+    )
+    db.session.add(reading)
+    db.session.commit()
+
+    # Process limits and bill generation
+    result = process_reading(device_name, litres, total_l, flow_lpm)
+
+    return jsonify({
+        "success": True,
+        "device": device_name,
+        "total_l": total_l,
+        "flow_lpm": flow_lpm,
+        "result": result
+    }), 200
+
 
 
 

@@ -10,7 +10,7 @@ except ImportError:
 
 logger = logging.getLogger("billing")
 
-# Re-billing threshold constant (generates a new bill for every 1.0 Litre after the limit)
+# Re-billing threshold constant (generates a new bill for every 1.0 Litre excess after prior bills)
 MIN_REBILL_L = float(os.getenv("MIN_REBILL_L", "1.0"))
 
 # Gracefully import publish_relay from mqtt_client, fallback to mqtt_stub if not yet present
