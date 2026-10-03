@@ -378,6 +378,10 @@
       return this.resetLitres(deviceId);
     },
 
+    async resetFlow(deviceId) {
+      return this.resetLitres(deviceId);
+    },
+
     /**
      * POST /api/auth/login with body {"username", "password"}
      */
@@ -1252,51 +1256,59 @@
   }
 
   function completePaymentSuccess(billId, amountPaise, paymentRef) {
-    const formattedAmt = (Number(amountPaise || 0) / 100).toFixed(2);
-    const payRef = paymentRef || `pay_${Date.now().toString(36)}`;
+    try {
+      const formattedAmt = (Number(amountPaise || 0) / 100).toFixed(2);
+      const payRef = paymentRef || `pay_${Date.now().toString(36)}`;
 
-    // Mark bill as paid in local memory immediately
-    const bill = (state.bills || []).find(b => String(b.id) === String(billId));
-    if (bill) {
-      bill.status = 'paid';
-      bill.payment_id = payRef;
+      // Mark bill as paid in local memory immediately
+      const bill = (state.bills || []).find(b => String(b.id) === String(billId));
+      if (bill) {
+        bill.status = 'paid';
+        bill.payment_id = payRef;
+      }
+
+      UI.showAlert(`Payment of ₹${formattedAmt} for Bill #${billId} verified successfully via Razorpay! Quota cycle reset to 0.0 L and motor valve restored to ON.`, 'success');
+      state.totalUsageLitres = 0.0;
+      state.relayState = 'ON';
+      state.flowRateLpm = 0.0;
+
+      // Dispatched direct MQTT reset command to ESP32 hardware
+      if (typeof MqttBridge !== 'undefined' && MqttBridge.publishReset) {
+        MqttBridge.publishReset(state.deviceId);
+      }
+
+      // Refresh UI & state immediately
+      UI.renderUsage({
+        total: 0.0,
+        free_limit: state.freeLimitLitres,
+        limit: state.monthlyLimitLitres,
+        rate_per_l: state.ratePerLitre,
+        flow_lpm: 0.0,
+        relay: 'ON',
+        status: state.deviceStatus
+      }, false);
+      UI.renderFlow(0.0);
+      UI.renderRelay('ON');
+      UI.renderBills(state.bills);
+
+      // Synchronize backend usage and relay
+      if (ApiClient.setRelay) ApiClient.setRelay(state.deviceId, 'ON').catch(() => {});
+      if (ApiClient.resetLitres) ApiClient.resetLitres(state.deviceId).catch(() => {});
+      if (ApiClient.ingestTelemetry) {
+        ApiClient.ingestTelemetry({
+          device: state.deviceId,
+          flow_lpm: 0.0,
+          litres: 0.0,
+          total: 0.0
+        }).catch(() => {});
+      }
+
+      setTimeout(() => {
+        pollData();
+      }, 600);
+    } catch (err) {
+      console.error('[CompletePaymentSuccess Error]:', err);
     }
-
-    UI.showAlert(`Payment of ₹${formattedAmt} for Bill #${billId} verified successfully via Razorpay! Quota cycle reset to 0.0 L and motor valve restored to ON.`, 'success');
-    state.totalUsageLitres = 0.0;
-    state.relayState = 'ON';
-    state.flowRateLpm = 0.0;
-
-    // Dispatched direct MQTT reset command to ESP32 hardware
-    MqttBridge.publishReset(state.deviceId);
-
-    // Refresh UI & state immediately
-    UI.renderUsage({
-      total: 0.0,
-      free_limit: state.freeLimitLitres,
-      limit: state.monthlyLimitLitres,
-      rate_per_l: state.ratePerLitre,
-      flow_lpm: 0.0,
-      relay: 'ON',
-      status: state.deviceStatus
-    }, false);
-    UI.renderFlow(0.0);
-    UI.renderRelay('ON');
-    UI.renderBills(state.bills);
-
-    // Synchronize backend usage and relay
-    ApiClient.setRelay(state.deviceId, 'ON').catch(() => {});
-    ApiClient.resetFlow(state.deviceId).catch(() => {});
-    ApiClient.ingestTelemetry({
-      device: state.deviceId,
-      flow_lpm: 0.0,
-      litres: 0.0,
-      total: 0.0
-    }).catch(() => {});
-
-    setTimeout(() => {
-      pollData();
-    }, 600);
   }
 
   /* ==========================================================================
