@@ -59,7 +59,7 @@ def set_device_relay(device_name: str, state: str, wait_for_ack: bool = False) -
     return published
 
 
-def is_device_online(device_name: str, max_silence_seconds: int = 30) -> bool:
+def is_device_online(device_name: str, max_silence_seconds: int = 60) -> bool:
     """
     Check if the device is online via MQTT status topic first,
     falling back to recent telemetry timestamp.
