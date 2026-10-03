@@ -1194,20 +1194,30 @@
         throw new Error('Razorpay Checkout SDK script is still loading. Please check network connection.');
       }
 
+      const isRealRazorpayOrder = Boolean(
+        orderData.order_id &&
+        orderData.order_id.startsWith('order_') &&
+        !orderData.order_id.startsWith('order_rzp_') &&
+        !orderData.order_id.startsWith('order_sim_') &&
+        !orderData.order_id.startsWith('order_local_')
+      );
+
       const options = {
         key: razorpayKey,
         amount: orderData.amount, // in paise
-        currency: orderData.currency || 'INR',
+        currency: 'INR',
         name: 'AquaPulse Groundwater',
         description: `Excess Usage Invoice #${billId} (${state.deviceId})`,
         image: 'https://cdn-icons-png.flaticon.com/512/3105/3105807.png',
-        order_id: (orderData.order_id && !orderData.order_id.startsWith('order_rzp_') && !orderData.order_id.startsWith('order_sim_'))
-          ? orderData.order_id
-          : undefined,
+        order_id: isRealRazorpayOrder ? orderData.order_id : undefined,
         prefill: {
           name: state.currentUser?.username || 'Customer',
-          email: 'customer@aquapulse.io',
-          contact: '9999999999'
+          email: 'test.customer@aquapulse.io',
+          contact: '9876543210'
+        },
+        notes: {
+          bill_id: String(billId),
+          device_id: String(state.deviceId)
         },
         theme: {
           color: '#0284c7'
