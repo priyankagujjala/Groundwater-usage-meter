@@ -913,15 +913,6 @@
       inputMqttPass: document.getElementById('input-mqtt-pass'),
       mqttBridgeStatusIndicator: document.getElementById('mqtt-bridge-status-indicator'),
       mqttHeaderIcon: document.getElementById('mqtt-header-icon'),
-
-      // Razorpay Checkout Modal Elements
-      rzpModalOverlay: document.getElementById('razorpay-modal-overlay'),
-      rzpModalTitle: document.getElementById('rzp-modal-title'),
-      rzpModalInvoiceRef: document.getElementById('rzp-modal-invoice-ref'),
-      rzpModalAmountDisplay: document.getElementById('rzp-modal-amount-display'),
-      rzpBtnPayText: document.getElementById('rzp-btn-pay-text'),
-      btnRzpConfirmPay: document.getElementById('btn-rzp-confirm-pay'),
-      btnCloseRzpModal: document.getElementById('btn-close-rzp-modal'),
     },
 
     renderRole() {
@@ -1175,15 +1166,8 @@
   };
 
   /* ==========================================================================
-     6. Razorpay Checkout Flow Handler
+     6. Razorpay Official Checkout Flow Handler
      ========================================================================== */
-  let activePayment = {
-    billId: null,
-    orderId: null,
-    amountPaise: 0,
-    amountRupees: '0.00'
-  };
-
   async function initiatePayment(billId, buttonEl) {
     if (!billId) return;
 
@@ -1191,66 +1175,98 @@
     if (buttonEl) {
       originalHtml = buttonEl.innerHTML;
       buttonEl.disabled = true;
-      buttonEl.innerHTML = `<span class="spinner-sm"></span> Opening Checkout...`;
+      buttonEl.innerHTML = `<span class="spinner-sm"></span> Opening Razorpay...`;
     }
 
     try {
-      // 1. Create order on backend (or MockEngine)
+      // 1. Create order on backend (Render API or Mock)
       const orderData = await ApiClient.createOrder(billId);
-      const amountPaise = Number(orderData.amount || 100);
-      const amountRupees = (amountPaise / 100).toFixed(2);
-      const orderId = orderData.order_id || `order_${Date.now()}`;
+      if (!orderData || !orderData.amount) {
+        throw new Error('Invalid order details from backend.');
+      }
 
-      activePayment = {
-        billId: billId,
-        orderId: orderId,
-        amountPaise: amountPaise,
-        amountRupees: amountRupees
+      const razorpayKey = (orderData.key_id && orderData.key_id !== 'rzp_test_placeholder' && orderData.key_id.startsWith('rzp_'))
+        ? orderData.key_id
+        : (window.CONFIG?.RAZORPAY_KEY_ID || 'rzp_test_1DP5mmOlF5G5ag');
+
+      // 2. Open Official Razorpay Test Popup Modal
+      if (typeof window.Razorpay === 'undefined') {
+        throw new Error('Razorpay Checkout SDK script is still loading. Please check network connection.');
+      }
+
+      const options = {
+        key: razorpayKey,
+        amount: orderData.amount, // in paise
+        currency: orderData.currency || 'INR',
+        name: 'AquaPulse Groundwater',
+        description: `Excess Usage Invoice #${billId} (${state.deviceId})`,
+        image: 'https://cdn-icons-png.flaticon.com/512/3105/3105807.png',
+        order_id: (orderData.order_id && !orderData.order_id.startsWith('order_rzp_') && !orderData.order_id.startsWith('order_sim_'))
+          ? orderData.order_id
+          : undefined,
+        prefill: {
+          name: state.currentUser?.username || 'Customer',
+          email: 'customer@aquapulse.io',
+          contact: '9999999999'
+        },
+        theme: {
+          color: '#0284c7'
+        },
+        modal: {
+          ondismiss: function () {
+            UI.showAlert('Razorpay checkout window closed. Bill remains unpaid.', 'warning');
+            if (buttonEl) {
+              buttonEl.disabled = false;
+              if (originalHtml) buttonEl.innerHTML = originalHtml;
+            }
+          }
+        },
+        handler: async function (response) {
+          try {
+            if (buttonEl) {
+              buttonEl.disabled = true;
+              buttonEl.innerHTML = `<span class="spinner-sm"></span> Verifying...`;
+            }
+            UI.showAlert('Payment received! Verifying cryptographic signature with backend...', 'warning');
+
+            await ApiClient.verifyPayment({
+              bill_id: billId,
+              order_id: response.razorpay_order_id || orderData.order_id,
+              payment_id: response.razorpay_payment_id || `pay_${Date.now()}`,
+              signature: response.razorpay_signature || 'test_signature'
+            });
+
+            completePaymentSuccess(billId, orderData.amount, response.razorpay_payment_id);
+          } catch (verifyErr) {
+            console.error('[Razorpay Verify Error]:', verifyErr);
+            UI.showAlert(`Payment verification failed: ${verifyErr.message}`, 'danger');
+          } finally {
+            if (buttonEl) {
+              buttonEl.disabled = false;
+              if (originalHtml) buttonEl.innerHTML = originalHtml;
+            }
+          }
+        }
       };
 
-      // 2. Populate and Open Razorpay Checkout Modal Overlay
-      if (UI.elements.rzpModalInvoiceRef) {
-        UI.elements.rzpModalInvoiceRef.textContent = `Excess Water Usage Invoice #${billId} (${state.deviceId})`;
-      }
-      if (UI.elements.rzpModalAmountDisplay) {
-        UI.elements.rzpModalAmountDisplay.textContent = `₹${amountRupees}`;
-      }
-      if (UI.elements.rzpBtnPayText) {
-        UI.elements.rzpBtnPayText.textContent = `Pay ₹${amountRupees} via Razorpay`;
-      }
-
-      // Reset Tabs to UPI default
-      document.querySelectorAll('.rzp-tab').forEach(tab => {
-        tab.classList.remove('active');
-        tab.style.background = 'transparent';
-        tab.style.borderColor = '#334155';
-        tab.style.color = '#94a3b8';
+      const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', function (resp) {
+        console.error('[Razorpay Payment Failed]:', resp.error);
+        UI.showAlert(`Payment failed: ${resp.error.description || resp.error.reason}`, 'danger');
+        if (buttonEl) {
+          buttonEl.disabled = false;
+          if (originalHtml) buttonEl.innerHTML = originalHtml;
+        }
       });
-      const upiTab = document.querySelector('.rzp-tab[data-tab="upi"]');
-      if (upiTab) {
-        upiTab.classList.add('active');
-        upiTab.style.background = 'rgba(2, 132, 199, 0.15)';
-        upiTab.style.borderColor = '#0284c7';
-        upiTab.style.color = '#38bdf8';
-      }
-      document.querySelectorAll('.rzp-tab-pane').forEach(p => p.style.display = 'none');
-      const upiPane = document.getElementById('rzp-content-upi');
-      if (upiPane) upiPane.style.display = 'block';
-
-      // Show Razorpay Modal Window
-      if (UI.elements.rzpModalOverlay) {
-        UI.elements.rzpModalOverlay.style.display = 'flex';
-      }
+      rzp.open();
 
     } catch (err) {
       console.error('[Initiate Payment Error]:', err);
-      UI.showAlert(`Unable to initialize checkout: ${err.message}`, 'danger');
+      UI.showAlert(`Unable to open Razorpay: ${err.message}`, 'danger');
     } finally {
       if (buttonEl) {
         buttonEl.disabled = false;
-        if (originalHtml) {
-          buttonEl.innerHTML = originalHtml;
-        }
+        if (originalHtml) buttonEl.innerHTML = originalHtml;
       }
     }
   }
@@ -1882,80 +1898,6 @@
 
         if (UI.elements.mqttModalOverlay) UI.elements.mqttModalOverlay.style.display = 'none';
         UI.showAlert('EMQX MQTT credentials updated. Connecting directly...', 'success');
-      });
-    }
-
-    // Razorpay Checkout Modal: Tab Switchers
-    document.querySelectorAll('.rzp-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        const targetTab = tab.getAttribute('data-tab');
-        document.querySelectorAll('.rzp-tab').forEach(t => {
-          t.classList.remove('active');
-          t.style.background = 'transparent';
-          t.style.borderColor = '#334155';
-          t.style.color = '#94a3b8';
-        });
-        tab.classList.add('active');
-        tab.style.background = 'rgba(2, 132, 199, 0.15)';
-        tab.style.borderColor = '#0284c7';
-        tab.style.color = '#38bdf8';
-
-        document.querySelectorAll('.rzp-tab-pane').forEach(p => p.style.display = 'none');
-        const targetPane = document.getElementById(`rzp-content-${targetTab}`);
-        if (targetPane) targetPane.style.display = 'block';
-      });
-    });
-
-    // Razorpay Checkout Modal: Close Actions
-    if (UI.elements.btnCloseRzpModal) {
-      UI.elements.btnCloseRzpModal.addEventListener('click', () => {
-        if (UI.elements.rzpModalOverlay) UI.elements.rzpModalOverlay.style.display = 'none';
-        UI.showAlert('Payment checkout closed. Invoice remains unpaid.', 'warning');
-      });
-    }
-    if (UI.elements.rzpModalOverlay) {
-      UI.elements.rzpModalOverlay.addEventListener('click', (e) => {
-        if (e.target === UI.elements.rzpModalOverlay) {
-          UI.elements.rzpModalOverlay.style.display = 'none';
-          UI.showAlert('Payment checkout closed. Invoice remains unpaid.', 'warning');
-        }
-      });
-    }
-
-    // Razorpay Checkout Modal: Confirm Payment Action
-    if (UI.elements.btnRzpConfirmPay) {
-      UI.elements.btnRzpConfirmPay.addEventListener('click', async () => {
-        if (!activePayment.billId) return;
-
-        const payBtn = UI.elements.btnRzpConfirmPay;
-        payBtn.disabled = true;
-        if (UI.elements.rzpBtnPayText) {
-          UI.elements.rzpBtnPayText.innerHTML = `<span class="spinner-sm"></span> Processing Secure Payment...`;
-        }
-
-        try {
-          const simPayId = `pay_rzp_${Date.now().toString(36)}`;
-          await ApiClient.verifyPayment({
-            bill_id: activePayment.billId,
-            order_id: activePayment.orderId,
-            payment_id: simPayId,
-            signature: `sig_${Math.random().toString(36).substring(2)}`
-          });
-
-          if (UI.elements.rzpModalOverlay) {
-            UI.elements.rzpModalOverlay.style.display = 'none';
-          }
-
-          completePaymentSuccess(activePayment.billId, activePayment.amountPaise, simPayId);
-        } catch (payErr) {
-          console.error('[Razorpay Payment Error]:', payErr);
-          UI.showAlert(`Payment verification failed: ${payErr.message}`, 'danger');
-        } finally {
-          payBtn.disabled = false;
-          if (UI.elements.rzpBtnPayText) {
-            UI.elements.rzpBtnPayText.textContent = `Pay ₹${activePayment.amountRupees || '0.00'} via Razorpay`;
-          }
-        }
       });
     }
   }
